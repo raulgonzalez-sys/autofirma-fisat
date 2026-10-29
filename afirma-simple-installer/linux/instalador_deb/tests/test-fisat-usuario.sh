@@ -29,6 +29,18 @@ der() {
 huella() { find "$@" -type f -print0 | sort -z | xargs -0 -r sha256sum; }
 # ms: milisegundos desde la época
 ms() { echo $(($(date +%s%N) / 1000000)); }
+# mt <fichero>: mtime con nanosegundos
+mt() { stat -c %.9Y "$1"; }
+# sha <fichero>: sha256 del contenido
+sha() { sha256sum <"$1" | cut -d' ' -f1; }
+# existe <ruta>: 1 si existe (o es un enlace), 0 si no
+existe() { if [ -e "$1" ] || [ -L "$1" ]; then echo 1; else echo 0; fi; }
+# es_dir_real <ruta>: 1 si es un directorio y no un enlace
+es_dir_real() { if [ -d "$1" ] && [ ! -L "$1" ]; then echo 1; else echo 0; fi; }
+# lineas <fichero> <línea>: veces que aparece exactamente esa línea
+lineas() { grep -cFx -- "$2" "$1" || true; }
+# fn_check <función> <args...>: como fn, en modo --check
+fn_check() { bash -c '. "$1"; shift; MODO_CHECK=1; "$@"' fn "$S" "$@"; }
 # nuevo_caso: HOME, estado y runtime vacíos
 nuevo_caso() {
 	rm -rf "${T:?}/home" "${T:?}/state" "${T:?}/run"
@@ -46,6 +58,13 @@ mk_ff() {
 	done
 	mk_ini "$raiz" "$ini"
 }
+
+# Líneas que exige user.js y entrada esperada de handlers.json
+UJ1='user_pref("network.protocol-handler.expose.afirma", true);'
+UJ2='user_pref("security.external_protocol_requires_permission", false);'
+AFIRMA='{"action":2,"handlers":[{"name":"AutoFirma","path":"/usr/bin/autofirma"}]}'
+# handlers.json de un perfil real de Firefox ESR 140
+HANDLERS_ESR='{"defaultHandlersVersion":{},"mimeTypes":{"application/pdf":{"action":3,"extensions":["pdf"]},"image/webp":{"action":3,"extensions":["webp"]}},"schemes":{"mailto":{"stubEntry":true,"handlers":[null,{"name":"Gmail","uriTemplate":"https://mail.google.com/mail/?extsrc=mailto&url=%s"}]}},"isDownloadsImprovementsAlreadyMigrated":false}'
 
 nuevo_caso
 
@@ -127,7 +146,8 @@ chk C10_nuevo igual "$(der "$T/c10" SocketAutoFirma "$T/A.cer")"
 
 # --- Perfiles (ff_perfiles) ---
 
-mk_ini "$T/p1" "[Profile0]
+# profiles.ini real del skel de la flota
+INI_SKEL="[Profile0]
 Name=fisat
 IsRelative=1
 Default=1
@@ -139,6 +159,7 @@ StartWithLastProfile=1
 [Install3B6073811A6ABF12]
 Default=default-esr
 Locked=1"
+mk_ini "$T/p1" "$INI_SKEL"
 chk P1_skel_real "ACTIVO $T/p1/default-esr
 PERFIL $T/p1/default-esr" "$(fn ff_perfiles "$T/p1")"
 
@@ -235,11 +256,61 @@ mk_ff "$R" uno
 mk_nss "$R/uno"
 h1=$(huella "$HOME")
 chk U11_check_pendiente 1 "$(rc "$S" --check)"
-chk U11_check_linea "pendiente $R/uno" "$("$S" --check || true)"
+"$S" --check >"$T/u11.out" || true
+chk U11_check_linea 1 "$(lineas "$T/u11.out" "pendiente $R/uno")"
+chk U11_check_linea_pki 1 "$(lineas "$T/u11.out" "pendiente $HOME/.pki/nssdb")"
+chk U11_check_linea_userjs 1 "$(lineas "$T/u11.out" "pendiente $R/uno/user.js")"
+chk U11_check_linea_handlers 1 "$(lineas "$T/u11.out" "pendiente $R/uno/handlers.json")"
 chk U11_home_igual "$h1" "$(huella "$HOME")"
+chk U11_sin_pki 0 "$(existe "$HOME/.pki")"
 chk U11_sin_log 0 "$(find "$XDG_STATE_HOME" -mindepth 1 | wc -l)"
 "$S" --quiet
 chk U11_check_tras_arreglo 0 "$(rc "$S" --check)"
+chk U11_check_tras_arreglo_sin_salida "" "$("$S" --check)"
+
+# U11b: enlace colgante, user.js con otro valor y handlers.json sin afirma; --check no toca nada
+nuevo_caso
+R=$HOME/.mozilla/firefox
+mk_ff "$R" uno
+mk_nss "$R/uno"
+"$S" --quiet
+mkdir -p "$HOME/.pki"
+ln -sfn "$R/borrado" "$HOME/.pki/nssdb"
+printf '%s\n' 'user_pref("network.protocol-handler.expose.afirma", false);' >"$R/uno/user.js"
+printf '%s' "$HANDLERS_ESR" >"$R/uno/handlers.json"
+h1=$(huella "$HOME")
+chk U11b_check 1 "$(rc "$S" --check)"
+"$S" --check >"$T/u11b.out" || true
+chk U11b_linea_pki 1 "$(lineas "$T/u11b.out" "pendiente $HOME/.pki/nssdb")"
+chk U11b_linea_userjs 1 "$(lineas "$T/u11b.out" "pendiente $R/uno/user.js")"
+chk U11b_linea_handlers 1 "$(lineas "$T/u11b.out" "pendiente $R/uno/handlers.json")"
+chk U11b_home_igual "$h1" "$(huella "$HOME")"
+chk U11b_enlace_igual "$R/borrado" "$(readlink "$HOME/.pki/nssdb")"
+chk U11b_userjs_fn 1 "$(rc fn_check userjs_sync "$R/uno")"
+chk U11b_handlers_fn 1 "$(rc fn_check handlers_sync "$R/uno")"
+chk U11b_pki_fn 1 "$(rc fn_check pki_sync "$R/uno")"
+chk U11b_home_igual_fn "$h1" "$(huella "$HOME")"
+"$S" --quiet
+chk U11b_check_tras_arreglo 0 "$(rc "$S" --check)"
+
+# U11c: ~/.pki/nssdb directorio real sin el certificado; --check lo cuenta y no escribe
+nuevo_caso
+mk_nss "$HOME/.pki/nssdb"
+h1=$(huella "$HOME")
+chk U11c_check 1 "$(rc "$S" --check)"
+chk U11c_linea "pendiente $HOME/.pki/nssdb" "$("$S" --check || true)"
+chk U11c_home_igual "$h1" "$(huella "$HOME")"
+"$S" --quiet
+chk U11c_check_tras_arreglo 0 "$(rc "$S" --check)"
+
+# U11d: handlers.json ilegible; --check da error (2)
+nuevo_caso
+R=$HOME/.mozilla/firefox
+mk_ff "$R" uno
+"$S" --quiet
+printf '{"schemes":' >"$R/uno/handlers.json"
+chk U11d_check 2 "$(rc "$S" --check)"
+chk U11d_linea 1 "$("$S" --check | grep -c "^error $R/uno/handlers.json" || true)"
 
 # U12_quiet
 nuevo_caso
@@ -249,7 +320,7 @@ mk_nss "$HOME/.mozilla/firefox/uno"
 chk U12_stdout_vacio 0 "$(stat -c%s "$T/u12.out")"
 chk U12_stderr_vacio 0 "$(stat -c%s "$T/u12.err")"
 chk U12_instalado igual "$(der "$HOME/.mozilla/firefox/uno" SocketAutoFirma "$T/A.cer")"
-chk U12_log 1 "$(grep -c '\[info\]' "$XDG_STATE_HOME/autofirma-fisat/usuario.log")"
+chk U12_log 1 "$(grep -c '\[info\] certificado instalado' "$XDG_STATE_HOME/autofirma-fisat/usuario.log")"
 
 # U13_candado: espera a que el otro proceso suelte el candado
 nuevo_caso
@@ -288,8 +359,9 @@ mkdir -p "$(dirname "$L")"
 head -c 300000 /dev/zero | tr '\0' 'x' >"$L"
 "$S" --quiet
 chk U15_log1 300000 "$(stat -c%s "$L.1")"
-chk U15_log_nuevo 1 "$(wc -l <"$L")"
-chk U15_formato 1 "$(grep -cE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{4} \[info\] ' "$L")"
+chk U15_log_nuevo 0 "$(grep -c '^x' "$L" || true)"
+chk U15_log_no_vacio 1 "$([ "$(wc -l <"$L")" -ge 1 ] && echo 1 || echo 0)"
+chk U15_formato "$(wc -l <"$L")" "$(grep -cE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{4} \[info\] ' "$L")"
 
 # U16_rapido: todo correcto con 3 perfiles, menos de 1 s y sin escribir el log
 nuevo_caso
@@ -315,7 +387,10 @@ mk_ff "$HOME/.mozilla/firefox" "perfil fisat"
 mk_nss "$HOME/.mozilla/firefox/perfil fisat"
 chk U17_rc 0 "$(rc "$S" --quiet)"
 chk U17_instalado igual "$(der "$HOME/.mozilla/firefox/perfil fisat" SocketAutoFirma "$T/A.cer")"
-chk U17_log 1 "$(grep -c "\[info\] .*$HOME/.mozilla/firefox/perfil fisat" "$HOME/.local/state/autofirma-fisat/usuario.log")"
+chk U17_log 1 "$(grep -c "\[info\] certificado instalado en $HOME/.mozilla/firefox/perfil fisat" "$HOME/.local/state/autofirma-fisat/usuario.log")"
+chk U17_pki "$HOME/.mozilla/firefox/perfil fisat" "$(readlink -f "$HOME/.pki/nssdb")"
+chk U17_userjs 1 "$(lineas "$HOME/.mozilla/firefox/perfil fisat/user.js" "$UJ1")"
+chk U17_handlers '/usr/bin/autofirma' "$(jq -r '.schemes.afirma.handlers[0].path' "$HOME/.mozilla/firefox/perfil fisat/handlers.json")"
 
 # U18_contrasena_maestra: se omite con aviso y --check lo cuenta como bien
 nuevo_caso
@@ -335,6 +410,204 @@ mk_nss "$HOME/.mozilla/firefox/uno"
 mkdir -p "$HOME/.config/mozilla"
 ln -s ../../.mozilla/firefox "$HOME/.config/mozilla/firefox"
 "$S" --quiet
-chk U19_una_linea 1 "$(grep -c '\[info\]' "$XDG_STATE_HOME/autofirma-fisat/usuario.log")"
+chk U19_una_linea 1 "$(grep -c '\[info\] certificado instalado' "$XDG_STATE_HOME/autofirma-fisat/usuario.log")"
+chk U19_userjs_una_vez 1 "$(grep -c '\[info\] .*user.js' "$XDG_STATE_HOME/autofirma-fisat/usuario.log")"
+
+# --- ~/.pki/nssdb (pki_sync) ---
+
+# U2_skel_recien_copiado: el enlace relativo del skel ya apunta al perfil activo y no se reescribe
+nuevo_caso
+R=$HOME/.mozilla/firefox
+mk_ini "$R" "$INI_SKEL"
+mk_nss "$R/default-esr"
+mkdir -p "$HOME/.pki"
+ln -s ../.mozilla/firefox/default-esr "$HOME/.pki/nssdb"
+chk U2_rc 0 "$(rc "$S" --quiet)"
+chk U2_flags "C,," "$(confianza "$R/default-esr" SocketAutoFirma)"
+chk U2_der igual "$(der "$R/default-esr" SocketAutoFirma "$T/A.cer")"
+chk U2_enlace_relativo ../.mozilla/firefox/default-esr "$(readlink "$HOME/.pki/nssdb")"
+chk U2_check 0 "$(rc "$S" --check)"
+
+# U2b_ausente: se crea ~/.pki y el enlace al perfil activo
+nuevo_caso
+R=$HOME/.mozilla/firefox
+mk_ini "$R" "$INI_SKEL"
+mk_nss "$R/default-esr"
+chk U2b_rc 0 "$(rc "$S" --quiet)"
+chk U2b_enlace 1 "$([ -L "$HOME/.pki/nssdb" ] && echo 1 || echo 0)"
+chk U2b_destino "$(realpath "$R/default-esr")" "$(readlink -f "$HOME/.pki/nssdb")"
+
+# U2c_activo_sin_cert9: sin cert9.db en el perfil activo no se crea el enlace
+nuevo_caso
+mk_ini "$HOME/.mozilla/firefox" "$INI_SKEL"
+mkdir -p "$HOME/.mozilla/firefox/default-esr"
+chk U2c_rc 0 "$(rc "$S" --quiet)"
+chk U2c_sin_pki 0 "$(existe "$HOME/.pki")"
+
+# U3_pki_directorio_real: nunca se borra ni se mueve; recibe el certificado y conserva el del usuario
+nuevo_caso
+R=$HOME/.mozilla/firefox
+mk_ff "$R" uno
+mk_nss "$R/uno"
+P=$HOME/.pki/nssdb
+mk_nss "$P"
+head -c 64 /dev/urandom >"$T/ruido"
+certutil -S -d "sql:$P" -n "Usuario Prueba" -s "CN=Usuario Prueba" -x -t "u,u,u" -k rsa -g 2048 -z "$T/ruido" -f /dev/null </dev/null >/dev/null 2>&1
+chk U3_rc 0 "$(rc "$S" --quiet)"
+chk U3_sigue_directorio 1 "$(es_dir_real "$P")"
+chk U3_cert_usuario 1 "$(entradas "$P" "Usuario Prueba")"
+chk U3_clave_usuario 1 "$(certutil -K -d "sql:$P" -f /dev/null 2>/dev/null | grep -c 'Usuario Prueba' || true)"
+chk U3_socket igual "$(der "$P" SocketAutoFirma "$T/A.cer")"
+chk U3_socket_flags "C,," "$(confianza "$P" SocketAutoFirma)"
+chk U3_perfil igual "$(der "$R/uno" SocketAutoFirma "$T/A.cer")"
+chk U3_log 1 "$(grep -c '\[aviso\] no se enlaza: directorio real' "$XDG_STATE_HOME/autofirma-fisat/usuario.log")"
+chk U3_check 0 "$(rc "$S" --check)"
+
+# U4_pki_colgante: se repunta al perfil activo
+nuevo_caso
+R=$HOME/.mozilla/firefox
+mk_ff "$R" uno
+mk_nss "$R/uno"
+mkdir -p "$HOME/.pki"
+ln -s "$R/borrado" "$HOME/.pki/nssdb"
+chk U4_check 1 "$(rc "$S" --check)"
+chk U4_rc 0 "$(rc "$S" --quiet)"
+chk U4_enlace 1 "$([ -L "$HOME/.pki/nssdb" ] && echo 1 || echo 0)"
+chk U4_destino "$(realpath "$R/uno")" "$(readlink -f "$HOME/.pki/nssdb")"
+chk U4_sin_temporales 1 "$(find "$HOME/.pki" -mindepth 1 | wc -l)"
+chk U4_check_tras_arreglo 0 "$(rc "$S" --check)"
+
+# U5_pki_otro_perfil_y_ajeno: otro perfil Firefox se repunta; algo ajeno se deja y se registra
+nuevo_caso
+R=$HOME/.mozilla/firefox
+mk_ff "$R" uno dos
+mk_nss "$R/uno"
+mk_nss "$R/dos"
+mkdir -p "$HOME/.pki"
+ln -s "$R/dos" "$HOME/.pki/nssdb"
+chk U5_otro_rc 0 "$(rc "$S" --quiet)"
+chk U5_otro_destino "$(realpath "$R/uno")" "$(readlink -f "$HOME/.pki/nssdb")"
+
+nuevo_caso
+R=$HOME/.mozilla/firefox
+mk_ff "$R" uno
+mk_nss "$R/uno"
+mk_nss "$T/otra"
+mkdir -p "$HOME/.pki"
+ln -s "$T/otra" "$HOME/.pki/nssdb"
+h1=$(huella "$T/otra")
+chk U5_ajeno_rc 0 "$(rc "$S" --quiet)"
+chk U5_ajeno_igual "$T/otra" "$(readlink "$HOME/.pki/nssdb")"
+chk U5_ajeno_intacto "$h1" "$(huella "$T/otra")"
+chk U5_ajeno_log 1 "$(grep -c "\[aviso\] .*$T/otra" "$XDG_STATE_HOME/autofirma-fisat/usuario.log")"
+chk U5_ajeno_check 0 "$(rc "$S" --check)"
+
+# --- user.js (userjs_sync) ---
+
+# U6_userjs
+nuevo_caso
+P=$HOME/perfil
+mkdir -p "$P"
+fn userjs_sync "$P" 2>/dev/null
+chk U6_ausente "$UJ1
+$UJ2" "$(cat "$P/user.js")"
+
+printf '%s\n' 'user_pref("browser.startup.homepage", "https://example.org");' '// comentario' >"$P/user.js"
+chmod 640 "$P/user.js"
+fn userjs_sync "$P" 2>/dev/null
+chk U6_previo 'user_pref("browser.startup.homepage", "https://example.org");
+// comentario
+'"$UJ1
+$UJ2" "$(cat "$P/user.js")"
+chk U6_modo 640 "$(stat -c %a "$P/user.js")"
+
+printf '%s\n' 'user_pref("network.protocol-handler.expose.afirma", false);' 'user_pref("a", 1);' "$UJ2" >"$P/user.js"
+fn userjs_sync "$P" 2>/dev/null
+chk U6_valor_falso 'user_pref("a", 1);'"
+$UJ1
+$UJ2" "$(cat "$P/user.js")"
+
+printf '%s\n' "$UJ1" "$UJ2" "$UJ1" 'user_pref("b", 2);' "$UJ2" 'user_pref("security.external_protocol_requires_permission", true);' >"$P/user.js"
+fn userjs_sync "$P" 2>/dev/null
+chk U6_duplicadas_uj1 1 "$(lineas "$P/user.js" "$UJ1")"
+chk U6_duplicadas_uj2 1 "$(lineas "$P/user.js" "$UJ2")"
+chk U6_duplicadas_sin_otro_valor 0 "$(grep -c 'requires_permission", true' "$P/user.js" || true)"
+chk U6_duplicadas_conserva 1 "$(lineas "$P/user.js" 'user_pref("b", 2);')"
+
+printf '%s' 'user_pref("c", 3);' >"$P/user.js"
+fn userjs_sync "$P" 2>/dev/null
+chk U6_sin_salto_final 'user_pref("c", 3);'"
+$UJ1
+$UJ2" "$(cat "$P/user.js")"
+chk U6_acaba_en_salto 0a "$(tail -c 1 "$P/user.js" | od -An -tx1 | tr -d ' ')"
+
+m1=$(mt "$P/user.js")
+fn userjs_sync "$P" 2>/dev/null
+chk U6_segunda_misma_mtime "$m1" "$(mt "$P/user.js")"
+
+printf '%s\n' "$UJ2" 'user_pref("d", 4);' "$UJ1" >"$P/user.js"
+m1=$(mt "$P/user.js")
+fn userjs_sync "$P" 2>/dev/null
+chk U6_bien_en_otro_orden "$m1" "$(mt "$P/user.js")"
+chk U6_sin_temporales 1 "$(find "$P" -mindepth 1 | wc -l)"
+
+# --- handlers.json (handlers_sync) ---
+
+# U7_handlers
+nuevo_caso
+R=$HOME/.mozilla/firefox
+mk_ff "$R" uno
+P=$R/uno
+chk U7_rc 0 "$(rc "$S" --quiet)"
+chk U7_ausente_afirma "$AFIRMA" "$(jq -c .schemes.afirma "$P/handlers.json")"
+chk U7_ausente_base '{"defaultHandlersVersion":{},"mimeTypes":{},"schemes":{"afirma":'"$AFIRMA"'}}' "$(cat "$P/handlers.json")"
+
+nuevo_caso
+R=$HOME/.mozilla/firefox
+mk_ff "$R" uno
+P=$R/uno
+printf '%s' "$HANDLERS_ESR" >"$P/handlers.json"
+chmod 640 "$P/handlers.json"
+"$S" --quiet
+chk U7_afirma "$AFIRMA" "$(jq -c .schemes.afirma "$P/handlers.json")"
+chk U7_mimetypes "$(jq -c .mimeTypes <<<"$HANDLERS_ESR")" "$(jq -c .mimeTypes "$P/handlers.json")"
+chk U7_mailto "$(jq -c .schemes.mailto <<<"$HANDLERS_ESR")" "$(jq -c .schemes.mailto "$P/handlers.json")"
+chk U7_migrated false "$(jq -c .isDownloadsImprovementsAlreadyMigrated "$P/handlers.json")"
+chk U7_compacto "$(jq -c . "$P/handlers.json")" "$(cat "$P/handlers.json")"
+chk U7_modo 640 "$(stat -c %a "$P/handlers.json")"
+m1=$(mt "$P/handlers.json")
+"$S" --quiet
+chk U7_segunda_misma_mtime "$m1" "$(mt "$P/handlers.json")"
+chk U7_sin_temporales 0 "$(find "$P" -name '.handlers*' | wc -l)"
+
+printf '{"schemes":' >"$P/handlers.json"
+h1=$(sha "$P/handlers.json")
+chk U7_invalido_rc 0 "$(rc "$S" --quiet)"
+chk U7_invalido_intacto "$h1" "$(sha "$P/handlers.json")"
+chk U7_invalido_log 1 "$(grep -c "\[error\] .*$P/handlers.json" "$XDG_STATE_HOME/autofirma-fisat/usuario.log")"
+
+# U8_perfil_abierto: con Firefox abierto no se escribe handlers.json; user.js sí
+nuevo_caso
+R=$HOME/.mozilla/firefox
+mk_ff "$R" uno
+P=$R/uno
+printf '%s' "$HANDLERS_ESR" >"$P/handlers.json"
+sleep 60 &
+vivo=$!
+ln -s "127.0.1.1:+$vivo" "$P/lock"
+h1=$(sha "$P/handlers.json")
+chk U8_abierto_rc 0 "$(rc "$S" --quiet)"
+chk U8_abierto_handlers_igual "$h1" "$(sha "$P/handlers.json")"
+chk U8_abierto_log 1 "$(grep -c '\[aviso\] pendiente: perfil abierto' "$XDG_STATE_HOME/autofirma-fisat/usuario.log")"
+chk U8_abierto_userjs 1 "$(lineas "$P/user.js" "$UJ1")"
+chk U8_abierto_check 1 "$(rc "$S" --check)"
+kill "$vivo"
+wait "$vivo" 2>/dev/null || true
+muerto=$(bash -c 'echo $$')
+ln -sfn "127.0.1.1:+$muerto" "$P/lock"
+chk U8_cerrado_rc 0 "$(rc "$S" --quiet)"
+chk U8_cerrado_afirma "$AFIRMA" "$(jq -c .schemes.afirma "$P/handlers.json")"
+chk U8_cerrado_userjs 1 "$(lineas "$P/user.js" "$UJ1")"
+chk U8_cerrado_check 0 "$(rc "$S" --check)"
 
 fin
