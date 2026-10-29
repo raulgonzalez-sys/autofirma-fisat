@@ -2,7 +2,7 @@ Package: autofirma
 Architecture: all
 Section: utils
 Priority: optional
-Depends: libnss3-tools, openjdk-21-jre | default-jre, openssl, ca-certificates
+Depends: libnss3-tools, openjdk-21-jre | default-jre, openssl, ca-certificates, python3
 Version: 0.0.0+fisat0
 License: GPL-2+ | EUPL-1.1
 Maintainer: FISAT Sistemas <286638612+raulgonzalez-sys@users.noreply.github.com>

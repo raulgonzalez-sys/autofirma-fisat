@@ -1,7 +1,14 @@
 #!/bin/bash
-# aviso() no se usa en este script; se define por coherencia con los demas
-# shellcheck disable=SC2317
 aviso() { echo "autofirma $0: AVISO: $*" >&2; }
+
+# Quita la clave de la extension CSP de policies.json solo al desinstalar, nunca al actualizar
+case "$1" in
+	remove|purge)
+		for pj in /etc/firefox/policies/policies.json /etc/firefox-esr/policies/policies.json; do
+			/usr/lib/Autofirma/fisat-politicas.py remove "$pj" autofirma-csp-fix@local --delete-if-empty || aviso "no se pudo quitar la extension CSP de $pj"
+		done
+		;;
+esac
 
 echo "Desinstalación completada con exito"
 exit 0

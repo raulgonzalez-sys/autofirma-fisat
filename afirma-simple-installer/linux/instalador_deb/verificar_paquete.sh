@@ -24,7 +24,7 @@ dpkg-deb -e "$DEB" "$X/DEBIAN"
 listado() { dpkg-deb --fsys-tarfile "$DEB" | tar -tvf - | awk '{print $1, $2, $6}'; }
 
 chk_control_depends() {
-	local d esperado='libnss3-tools, openjdk-21-jre | default-jre, openssl, ca-certificates'
+	local d esperado='libnss3-tools, openjdk-21-jre | default-jre, openssl, ca-certificates, python3'
 	d=$(dpkg-deb -f "$DEB" Depends)
 	[ "$d" = "$esperado" ] || { echo "Depends='$d'"; return 1; }
 	case $d in *headless*) echo "Depends contiene headless"; return 1 ;; esac
@@ -147,6 +147,26 @@ chk_desktop() {
 	salida=$(desktop-file-validate "$X/usr/share/applications/afirma.desktop" 2>&1 || true)
 	errores=$(grep ': error:' <<<"$salida" || true)
 	[ -z "$errores" ] || { echo "$errores"; return 1; }
+}
+
+chk_xpi() {
+	local f=./usr/share/Autofirma/autofirma-csp-fix.xpi esperado=b66e27aab78bcd6be72dbedca10ddc370309f47f19dce2a753a8b7bfe08048a9 obtenido
+	[ -f "$X/$f" ] || { echo "falta $f"; return 1; }
+	obtenido=$(sha256sum < "$X/$f" | cut -d' ' -f1)
+	[ "$obtenido" = "$esperado" ] || { echo "sha256 del xpi: $obtenido (esperado $esperado)"; return 1; }
+}
+
+# fisat-politicas.py ejecutable; postinst lo llama con add y postrm con remove solo en remove|purge
+chk_politicas() {
+	local perm fuera dentro
+	perm=$(listado | awk '$3 == "./usr/lib/Autofirma/fisat-politicas.py" {print $1}')
+	[ "$perm" = "-rwxr-xr-x" ] || { echo "fisat-politicas.py ausente o con permisos '$perm' (esperado -rwxr-xr-x)"; return 1; }
+	grep -Eq 'fisat-politicas\.py[[:space:]]+add[[:space:]]' "$X/DEBIAN/postinst" || { echo "postinst no llama a fisat-politicas.py add"; return 1; }
+	# postrm: llamadas a remove fuera y dentro de la rama remove|purge del case
+	fuera=$(awk '/^[[:space:]]*remove\|purge\)/ {d=1} d==0 && /fisat-politicas\.py[[:space:]]+remove/ {print} /;;/ {d=0}' "$X/DEBIAN/postrm")
+	dentro=$(awk '/^[[:space:]]*remove\|purge\)/ {d=1} d==1 && /fisat-politicas\.py[[:space:]]+remove/ {print} /;;/ {d=0}' "$X/DEBIAN/postrm")
+	[ -n "$dentro" ] || { echo "postrm no llama a fisat-politicas.py remove dentro de remove|purge"; return 1; }
+	[ -z "$fuera" ] || { echo "postrm llama a remove fuera de remove|purge: $fuera"; return 1; }
 }
 
 chk_maintainer_shellcheck() {

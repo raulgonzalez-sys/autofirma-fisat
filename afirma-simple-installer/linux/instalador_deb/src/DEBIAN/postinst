@@ -40,6 +40,15 @@ if [ -d /etc/firefox-esr ] ; then
 	ln -sfn /etc/firefox/pref/AutoFirma.js /etc/firefox-esr/pref/AutoFirma.js || aviso "no se pudo enlazar /etc/firefox-esr/pref/AutoFirma.js"
 fi
 
+# Extension CSP de Firefox: fusiona su clave en policies.json sin tocar el resto
+# /etc/firefox/policies lo leen Firefox ESR y el Firefox de Mozilla; el de firefox-esr solo si ya existe
+mkdir -p /etc/firefox/policies || aviso "no se pudo crear /etc/firefox/policies"
+for pj in /etc/firefox/policies/policies.json /etc/firefox-esr/policies/policies.json; do
+	if [ "$pj" = /etc/firefox/policies/policies.json ] || [ -f "$pj" ]; then
+		/usr/lib/Autofirma/fisat-politicas.py add "$pj" autofirma-csp-fix@local /usr/share/Autofirma/autofirma-csp-fix.xpi || aviso "no se pudo registrar la extension CSP en $pj"
+	fi
+done
+
 # borramos los ficheros de instalacion
 rm -f /usr/lib/Autofirma/script.sh /usr/lib/Autofirma/Autofirma_ROOT.crt || aviso "no se pudieron borrar los ficheros de instalacion"
 exit 0
