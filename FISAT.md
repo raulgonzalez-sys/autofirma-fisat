@@ -68,8 +68,8 @@ sirven para el `.deb`. El paquete siempre se construye con `env-install`.
 bash afirma-simple-installer/linux/instalador_deb/tests/run.sh
 ```
 
-El arnés de tests de shell lo crea la Tarea 11 de la fase 1; hasta entonces el
-comando no existe.
+Ejecuta los `test-*.sh`, `shellcheck` sobre los scripts del paquete y
+`py_compile`; sale 1 si algo falla.
 
 ### Verificación del paquete
 
@@ -77,7 +77,8 @@ comando no existe.
 afirma-simple-installer/linux/instalador_deb/verificar_paquete.sh <deb>
 ```
 
-Disponible cuando se cree `verificar_paquete.sh` (fase 1, paquete).
+Comprueba el `.deb` (estructura, `.desktop`, políticas de Firefox, scripts de
+mantenedor, etc.) y sale distinto de 0 si algo falla.
 
 ## Release y CI
 
@@ -108,11 +109,28 @@ D=afirma-simple-installer/linux/instalador_deb
 "$D/verificar_paquete.sh" /tmp/dist/autofirma_1.9.1+fisat0_all.deb
 ```
 
-## Tests JUnit nuevos del fork
+## Tests JUnit del fork
 
-Cada tarea de la fase 1 añade aquí sus clases de test (JUnit 4, nombre `*Test`
-o `Test*`, en el mismo paquete que la clase probada).
+Clases que ejecuta el job `pruebas` (`-Dtest` del workflow). JUnit 4, nombre
+`*Test` o `Test*`, en el mismo paquete que la clase probada. La columna
+"Origen" es el identificador del commit de la fase 1 que la añadió.
 
-| Clase | Módulo | Tarea |
+| Clase | Módulo | Origen |
 |---|---|---|
-| (se completa en cada tarea) | | |
+| `AfirmaWebSocketServerTest` | `afirma-simple` | I2 |
+| `SecureSocketUtilsTest` | `afirma-simple` | I3 |
+| `ServiceInvocationManagerTest` | `afirma-simple` | socket heredado solo en 127.0.0.1 |
+| `TestRestoreConfigFirefox` | `afirma-simple` | I7 |
+| `CertificateSelectionPanelTest` | `afirma-ui-core-jse-keystores` | I5 |
+| `TestConfiguratorLinuxUsers` | `afirma-ui-simple-configurator` | I1 |
+| `TestConfiguratorFirefoxLinux` | `afirma-ui-simple-configurator` | I7 |
+| `TestConfiguratorFirefoxCommon` | `afirma-ui-simple-configurator` | D1 |
+| `TestCertUtil` | `afirma-ui-simple-configurator` | línea base (ya existía) |
+
+## Notas operativas
+
+- Al migrar desde el paquete oficial hay que cerrar Firefox antes: el `prerm`
+  del paquete oficial hace `pkill firefox`.
+- El paso por usuario registra en `~/.local/state/autofirma-fisat/usuario.log`
+  y se diagnostica con `/usr/lib/Autofirma/fisat-usuario.sh --check` (sale 0
+  si está todo bien, 1 si hay algo pendiente, 2 si hay error).
