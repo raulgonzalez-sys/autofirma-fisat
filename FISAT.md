@@ -79,6 +79,35 @@ afirma-simple-installer/linux/instalador_deb/verificar_paquete.sh <deb>
 
 Disponible cuando se cree `verificar_paquete.sh` (fase 1, paquete).
 
+## Release y CI
+
+Workflow: `.github/workflows/autofirma-fisat.yml`.
+
+- En cada PR a `fisat` se ejecuta el job `pruebas` (tests Java y tests de
+  shell). Es el check obligatorio para fusionar.
+- Un tag `vX.Y.Z+fisatN` dispara además el job `deb`: valida que `X.Y.Z` sea la
+  versión del `pom.xml`, construye los JAR, genera y verifica el `.deb` y
+  publica `autofirma_X.Y.Z+fisatN_all.deb` y su `.sha256` en Releases.
+
+Cómo etiquetar, desde `fisat` ya actualizada y con `pruebas` en verde:
+
+```bash
+git tag -a v1.9.1+fisat1 -m "AutoFirma 1.9.1+fisat1 (fork FISAT)"
+git push origin v1.9.1+fisat1
+```
+
+Comprobación local del job `deb` sin publicar:
+
+```bash
+mvn -B -ntp -DskipTests -P env-dev,env-install \
+  -pl afirma-simple,afirma-ui-simple-configurator -am clean package
+D=afirma-simple-installer/linux/instalador_deb
+"$D/construir_deb.sh" 1.9.1+fisat0 /tmp/dist \
+  afirma-simple/target/autofirma.jar \
+  afirma-ui-simple-configurator/target/autofirmaConfigurador.jar
+"$D/verificar_paquete.sh" /tmp/dist/autofirma_1.9.1+fisat0_all.deb
+```
+
 ## Tests JUnit nuevos del fork
 
 Cada tarea de la fase 1 añade aquí sus clases de test (JUnit 4, nombre `*Test`
