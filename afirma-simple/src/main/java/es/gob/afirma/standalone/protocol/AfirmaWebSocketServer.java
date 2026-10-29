@@ -21,7 +21,9 @@ import org.java_websocket.framing.CloseFrame;
 import org.java_websocket.handshake.ClientHandshake;
 import org.java_websocket.server.WebSocketServer;
 
+import es.gob.afirma.core.ErrorCode;
 import es.gob.afirma.core.misc.protocol.ProtocolVersion;
+import es.gob.afirma.standalone.SimpleErrorCode;
 import es.gob.afirma.standalone.protocol.AfirmaWebSocketServerManager.BindingErrorListener;
 
 /**
@@ -34,6 +36,12 @@ public class AfirmaWebSocketServer extends WebSocketServer {
 
 	/** Prefijo de las peticiones de eco. */
 	private static final String ECHO_REQUEST_PREFIX = "echo="; //$NON-NLS-1$
+
+	/** Sufijo de las peticiones de eco. */
+	private static final String ECHO_REQUEST_SUFFIX = "@EOF"; //$NON-NLS-1$
+
+	/** Prefijo del parametro con el identificador de sesion. */
+	private static final String IDSESSION_PARAM_PREFIX = "idsession="; //$NON-NLS-1$
 
 	/** Respuesta que se debe enviar ante las peticiones de echo correctas. */
 	private static final String ECHO_OK_RESPONSE = "OK"; //$NON-NLS-1$
@@ -100,6 +108,70 @@ public class AfirmaWebSocketServer extends WebSocketServer {
 		}
 	}
 
+	/**
+	 * Comprueba que una direcci&oacute;n de red sea de loopback (127.0.0.0/8 o ::1).
+	 * @param a Direcci&oacute;n de red.
+	 * @return {@code true} si la direcci&oacute;n es de loopback, {@code false} en caso contrario.
+	 */
+	static boolean isLocalAddress(final InetAddress a) {
+		return a != null && a.isLoopbackAddress();
+	}
+
+	/**
+	 * Devuelve el valor del par&aacute;metro "idsession" del mensaje.
+	 * @param message Mensaje.
+	 * @return Par&aacute;metro "idsession" o {@code null} si no se encontr&oacute; o
+	 * no hay mensaje.
+	 */
+	static String getSessionId(final String message) {
+		if (message == null) {
+			return null;
+		}
+		String id = null;
+		final int idx = message.indexOf(IDSESSION_PARAM_PREFIX);
+		if (idx > -1) {
+			final int startIdx = idx + IDSESSION_PARAM_PREFIX.length();
+			final int endIdx = message.indexOf("&", startIdx); //$NON-NLS-1$
+			if (endIdx > -1) {
+				id = message.substring(startIdx, endIdx);
+			}
+			else {
+				id = message.substring(startIdx);
+				if (id.endsWith(ECHO_REQUEST_SUFFIX)) {
+					id = id.substring(0, id.length() - ECHO_REQUEST_SUFFIX.length());
+				}
+			}
+		}
+
+		return id;
+	}
+
+	/**
+	 * Comprueba que una petici&oacute;n llegue del propio equipo y, si se espera un
+	 * identificador de sesi&oacute;n, que lo incluya.
+	 * @param remote Direcci&oacute;n remota de la conexi&oacute;n.
+	 * @param expectedSessionId Identificador de sesi&oacute;n esperado o {@code null} si no se exige.
+	 * @param message Mensaje recibido.
+	 * @return {@code null} si la petici&oacute;n es v&aacute;lida o el c&oacute;digo de error en caso contrario.
+	 */
+	static ErrorCode checkRequest(final InetSocketAddress remote, final String expectedSessionId, final String message) {
+		// Comprobamos que la peticion haya llegado del mismo equipo
+		final InetAddress remoteAddress = remote != null ? remote.getAddress() : null;
+		if (!isLocalAddress(remoteAddress)) {
+			LOGGER.warning("Peticion al socket desde IP externa o sin identificar: " + remote); //$NON-NLS-1$
+			return SimpleErrorCode.Communication.EXTERNAL_REQUEST;
+		}
+
+		// Si se proporciono un ID de sesion al crear el socket y el ID del
+		// mensaje enviado no coincide con el mismo, ignoraremos la peticion
+		if (expectedSessionId != null && !expectedSessionId.equals(getSessionId(message))) {
+			LOGGER.warning("La peticion no incluia el id de sesion correcto"); //$NON-NLS-1$
+			return SimpleErrorCode.Request.INVALID_SESSION_ID;
+		}
+
+		return null;
+	}
+
 	@Override
 	public void onOpen(final WebSocket ws, final ClientHandshake handshake) {
 		LOGGER.info("Apertura del socket del puerto " + getAddress().getPort()); //$NON-NLS-1$
@@ -154,6 +226,13 @@ public class AfirmaWebSocketServer extends WebSocketServer {
 	@Override
 	public void onMessage(final WebSocket ws, final String message) {
 		LOGGER.info("Recibimos una peticion en el socket del puerto: " + getAddress().getPort()); //$NON-NLS-1$
+
+		// Comprobamos el origen y el id de sesion de la peticion
+		final ErrorCode requestError = checkRequest(ws.getRemoteSocketAddress(), this.sessionId, message);
+		if (requestError != null) {
+			broadcast(ProtocolInvocationLauncherErrorManager.getErrorMessage(MIN_PROTOCOL_VERSION, requestError), Collections.singletonList(ws));
+			return;
+		}
 
 		// Indicamos que el socket esta operativo y recibiendo peticiones
 		// para evitar el cierre de seguridad
