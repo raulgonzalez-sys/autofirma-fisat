@@ -281,7 +281,7 @@ final class ConfiguratorFirefoxLinux {
 	 * @throws IOException Cuando ocurre un error en el tratamiento de datos.
 	 * @throws GeneralSecurityException Cuando ocurre un error en la inserci&oacute;n del certificado en el KeyStore.
 	 */
-	private static void writeScriptsToMozillaKeyStore(
+	static void writeScriptsToMozillaKeyStore(
 												final String certUtilAbsolutePath,
 			                                    final File certDir,
 			                                    final List<File> profilesDir,
@@ -300,6 +300,15 @@ final class ConfiguratorFirefoxLinux {
 			// que no ha hecho el.
 			if (!hasNssKeyStore(profileDir)) {
 				LOGGER.info("Se omite un perfil de Mozilla sin almacen NSS inicializado: " //$NON-NLS-1$
+						+ profileDir.getAbsolutePath());
+				continue;
+			}
+
+			// Un almacen con contrasena maestra haria que certutil se quedara esperandola y
+			// colgara la instalacion. Se omite el perfil de los dos scripts; lo cubre el paso por usuario.
+			// Si no se puede determinar, tambien se omite.
+			if (ConfiguratorFirefoxCommon.isNssDbPasswordProtected(certUtilAbsolutePath, profileDir)) {
+				LOGGER.info("Se omite un perfil de Mozilla con almacen NSS protegido por contrasena o no comprobable: " //$NON-NLS-1$
 						+ profileDir.getAbsolutePath());
 				continue;
 			}

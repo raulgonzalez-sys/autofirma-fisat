@@ -10,8 +10,10 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Arrays;
 import java.util.List;
 
+import org.junit.Assume;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -150,5 +152,48 @@ public final class TestConfiguratorFirefoxLinux {
 
 		assertFalse(ConfiguratorFirefoxLinux.hasNssKeyStore(this.tmp.newFolder("vacio"))); //$NON-NLS-1$
 		assertFalse(ConfiguratorFirefoxLinux.hasNssKeyStore(new File(this.tmp.getRoot(), "inexistente"))); //$NON-NLS-1$
+	}
+
+	/** Los perfiles con contrasena maestra o sin almacen NSS no entran en los scripts.
+	 * @throws Exception En cualquier error. */
+	@Test
+	public void integracion_omite_protegidos() throws Exception {
+		Assume.assumeTrue(System.getProperty("os.name").toLowerCase().contains("linux")); //$NON-NLS-1$ //$NON-NLS-2$
+		final File marker = new File(this.tmp.getRoot(), "marcador-C"); //$NON-NLS-1$
+		final File fake = this.tmp.newFile("certutil-falso"); //$NON-NLS-1$
+		Files.write(fake.toPath(), (
+			"#!/bin/sh\n" //$NON-NLS-1$
+			+ "case \"$*\" in\n" //$NON-NLS-1$
+			+ "*perfilC*) touch '" + marker.getAbsolutePath() + "' ;;\n" //$NON-NLS-1$ //$NON-NLS-2$
+			+ "*perfilB*) echo 'Enter Password or Pin for \"NSS Certificate DB\":'; sleep 30 ;;\n" //$NON-NLS-1$
+			+ "*) echo 'certutil: no keys found' ;;\n" //$NON-NLS-1$
+			+ "esac\n" //$NON-NLS-1$
+		).getBytes(StandardCharsets.UTF_8));
+		assertTrue(fake.setExecutable(true));
+		Assume.assumeTrue(fake.canExecute());
+
+		final File a = this.tmp.newFolder("perfilA"); //$NON-NLS-1$
+		assertTrue(new File(a, "cert9.db").createNewFile()); //$NON-NLS-1$
+		assertTrue(new File(a, "pkcs11.txt").createNewFile()); //$NON-NLS-1$
+		final File b = this.tmp.newFolder("perfilB"); //$NON-NLS-1$
+		assertTrue(new File(b, "cert9.db").createNewFile()); //$NON-NLS-1$
+		assertTrue(new File(b, "pkcs11.txt").createNewFile()); //$NON-NLS-1$
+		final File c = this.tmp.newFolder("perfilC"); //$NON-NLS-1$
+		final File certDir = this.tmp.newFolder("certs"); //$NON-NLS-1$
+		final File install = new File(this.tmp.getRoot(), "install.sh"); //$NON-NLS-1$
+		final File uninstall = new File(this.tmp.getRoot(), "uninstall.sh"); //$NON-NLS-1$
+
+		ConfiguratorFirefoxLinux.writeScriptsToMozillaKeyStore(
+			fake.getAbsolutePath(), certDir, Arrays.asList(a, b, c), install, uninstall);
+
+		final String inst = new String(Files.readAllBytes(install.toPath()), StandardCharsets.UTF_8);
+		final String unin = new String(Files.readAllBytes(uninstall.toPath()), StandardCharsets.UTF_8);
+		assertTrue(inst, inst.contains("-A -d sql:" + a.getAbsolutePath())); //$NON-NLS-1$
+		assertTrue(unin, unin.contains("-D -d sql:" + a.getAbsolutePath())); //$NON-NLS-1$
+		assertFalse(inst, inst.contains(b.getAbsolutePath()));
+		assertFalse(unin, unin.contains(b.getAbsolutePath()));
+		assertFalse(inst, inst.contains(c.getAbsolutePath()));
+		assertFalse(unin, unin.contains(c.getAbsolutePath()));
+		assertFalse(marker.exists());
 	}
 }
