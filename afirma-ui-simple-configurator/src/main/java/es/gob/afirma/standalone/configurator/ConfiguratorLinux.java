@@ -11,11 +11,9 @@ package es.gob.afirma.standalone.configurator;
 
 import java.awt.GraphicsEnvironment;
 import java.awt.HeadlessException;
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,11 +22,13 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import es.gob.afirma.core.misc.BoundedBufferedReader;
 import es.gob.afirma.core.misc.LoggerUtil;
 import es.gob.afirma.standalone.configurator.CertUtil.CertPack;
 import es.gob.afirma.standalone.configurator.common.ConfiguratorUtil;
@@ -175,45 +175,118 @@ final class ConfiguratorLinux implements Configurator {
 		return new File(userHome, ".afirma/Autofirma"); //$NON-NLS-1$
 	}
 
-    /** Obtiene los directorios de usuarios del sistema.
-	 * @return Listado con todos directorios de los usuarios del sistema.
-     * @throws IOException Cuando no se puede obtener el listado de directorios. */
-	private static String[] getSystemUsersHomes() throws IOException {
+	private static final int GETENT_TIMEOUT_SECONDS = 10;
 
-        // Comando para sacar los usuarios del sistema
-        final String[] command = new String[] {
-				"cut", //$NON-NLS-1$
-				"-d:", //$NON-NLS-1$
-				"-f6", //$NON-NLS-1$
-				"/etc/passwd" //$NON-NLS-1$
-				};
+	private static final int MAX_PASSWD_LINES = 100000;
 
+	private static final String PASSWD_FILE = "/etc/passwd"; //$NON-NLS-1$
+
+	/** Obtiene los directorios de usuarios del sistema. Se consulta {@code getent passwd}
+	 * (para incluir usuarios de red) y, si falla, se lee {@code /etc/passwd}.
+	 * @return Listado con todos directorios de los usuarios del sistema que existen.
+	 * @throws IOException Cuando no se puede obtener el listado de directorios. */
+	static String[] getSystemUsersHomes() throws IOException {
+
+		String passwd = null;
 		try {
-			final Process process = new ProcessBuilder(command).start();
-
-			String line;
-			// arraylist con todos los directorios de usuario
-			final List<String> usersDir = new ArrayList<>();
-			try (
-					final InputStream resIs = process.getInputStream();
-					final BufferedReader resReader = new BoundedBufferedReader(
-							new InputStreamReader(resIs),
-							2048, // Maximo 256 lineas de salida (256 perfiles)
-							2048 // Maximo 2048 caracteres por linea
-							);
-					) {
-				while ((line = resReader.readLine()) != null) {
-					if(line.toLowerCase().contains("home/") && !usersDir.contains(line)) { //$NON-NLS-1$
-						usersDir.add(line);
-					}
-				}
-			}
-			return usersDir.toArray(new String[usersDir.size()]);
+			passwd = readGetentPasswd();
 		}
 		catch (final Exception e) {
-			LOGGER.severe("Error al obtener el listado de directorios de usuarios del sistema: " + e); //$NON-NLS-1$
-			throw new IOException("No se pudo obtener el listado de directorios de usuarios del sistema", e); //$NON-NLS-1$
+			LOGGER.warning("No se pudo ejecutar 'getent passwd', se leera " + PASSWD_FILE + ": " + e); //$NON-NLS-1$ //$NON-NLS-2$
 		}
+
+		if (passwd == null) {
+			try {
+				passwd = new String(Files.readAllBytes(new File(PASSWD_FILE).toPath()), StandardCharsets.UTF_8);
+			}
+			catch (final Exception e) {
+				LOGGER.severe("Error al obtener el listado de directorios de usuarios del sistema: " + e); //$NON-NLS-1$
+				throw new IOException("No se pudo obtener el listado de directorios de usuarios del sistema", e); //$NON-NLS-1$
+			}
+		}
+
+		final List<File> homes = filterExistingHomes(parsePasswdHomes(passwd));
+		final String[] ret = new String[homes.size()];
+		for (int i = 0; i < ret.length; i++) {
+			ret[i] = homes.get(i).getPath();
+		}
+		return ret;
+	}
+
+	/** Ejecuta {@code getent passwd} volcando la salida a un fichero temporal.
+	 * @return Salida del comando o {@code null} si falla, termina con error o vence el tiempo.
+	 * @throws IOException Si no se puede lanzar el proceso o usar el fichero temporal.
+	 * @throws InterruptedException Si se interrumpe la espera. */
+	private static String readGetentPasswd() throws IOException, InterruptedException {
+
+		final File out = File.createTempFile("afirma_getent", ".txt"); //$NON-NLS-1$ //$NON-NLS-2$
+		try {
+			final Process process = new ProcessBuilder("getent", "passwd") //$NON-NLS-1$ //$NON-NLS-2$
+				.redirectErrorStream(false)
+				.redirectOutput(out)
+				.start();
+			if (!process.waitFor(GETENT_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+				process.destroyForcibly();
+				LOGGER.warning("'getent passwd' no termino en " + GETENT_TIMEOUT_SECONDS + " segundos"); //$NON-NLS-1$ //$NON-NLS-2$
+				return null;
+			}
+			if (process.exitValue() != 0) {
+				LOGGER.warning("'getent passwd' termino con codigo " + process.exitValue()); //$NON-NLS-1$
+				return null;
+			}
+			return new String(Files.readAllBytes(out.toPath()), StandardCharsets.UTF_8);
+		}
+		finally {
+			if (!out.delete()) {
+				out.deleteOnExit();
+			}
+		}
+	}
+
+	/** Extrae los directorios de usuario (bajo un {@code home/}) de un listado con formato passwd.
+	 * @param passwdContent Contenido con formato {@code /etc/passwd} (puede ser {@code null}).
+	 * @return Directorios de usuario, sin repetir y en orden de aparicion. */
+	static List<File> parsePasswdHomes(final String passwdContent) {
+
+		final Set<File> homes = new LinkedHashSet<>();
+		if (passwdContent == null) {
+			return new ArrayList<>();
+		}
+
+		final String[] lines = passwdContent.split("\r?\n", -1); //$NON-NLS-1$
+		int count = 0;
+		for (final String line : lines) {
+			if (++count > MAX_PASSWD_LINES) {
+				LOGGER.warning("El listado de usuarios supera " + MAX_PASSWD_LINES + " lineas, se ignora el resto"); //$NON-NLS-1$ //$NON-NLS-2$
+				break;
+			}
+			if (line.isEmpty() || line.startsWith("#")) { //$NON-NLS-1$
+				continue;
+			}
+			final String[] fields = line.split(":", -1); //$NON-NLS-1$
+			if (fields.length < 6) {
+				continue;
+			}
+			final String home = fields[5].trim();
+			if (home.isEmpty() || !home.startsWith("/") || !home.toLowerCase().contains("home/")) { //$NON-NLS-1$ //$NON-NLS-2$
+				continue;
+			}
+			homes.add(new File(home));
+		}
+		return new ArrayList<>(homes);
+	}
+
+	/** Filtra los directorios de usuario que existen.
+	 * @param homes Directorios de usuario.
+	 * @return Los que son directorios existentes. */
+	static List<File> filterExistingHomes(final List<File> homes) {
+		final List<File> existing = new ArrayList<>();
+		for (final File home : homes) {
+			if (home.isDirectory()) {
+				existing.add(home);
+			}
+		}
+		return existing;
 	}
 
 	@Override

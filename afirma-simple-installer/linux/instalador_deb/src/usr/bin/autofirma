@@ -1,2 +1,15 @@
 #!/bin/bash
-java -Djdk.tls.maxHandshakeMessageSize=65536 -jar /usr/lib/Autofirma/autofirma.jar "$@"
+# Paso por usuario previo, síncrono (el navegador conecta al websocket nada más arrancar); sus fallos no impiden arrancar.
+USUARIO=${AUTOFIRMA_FISAT_USUARIO:-/usr/lib/Autofirma/fisat-usuario.sh}
+if [ -x "$USUARIO" ]; then
+	timeout "${AUTOFIRMA_FISAT_TIMEOUT:-20}" "$USUARIO" --quiet || true
+fi
+
+exec java \
+	-Dswing.defaultlaf=javax.swing.plaf.nimbus.NimbusLookAndFeel \
+	-Dswing.systemlaf=javax.swing.plaf.nimbus.NimbusLookAndFeel \
+	-Dswing.crossplatformlaf=javax.swing.plaf.nimbus.NimbusLookAndFeel \
+	-Dawt.useSystemAAFontSettings=on \
+	-Dswing.aatext=true \
+	-Djdk.tls.maxHandshakeMessageSize=65536 \
+	-jar /usr/lib/Autofirma/autofirma.jar "$@"

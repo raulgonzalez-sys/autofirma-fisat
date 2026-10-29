@@ -223,6 +223,13 @@ final class RestoreConfigLinux implements RestoreConfig {
 		}
 	}
 
+	/** Indica si la salida de <code>id -u</code> corresponde al usuario root.
+	 * @param idOutput Salida del comando (puede incluir el salto de linea final).
+	 * @return {@code true} si el UID es 0, {@code false} en cualquier otro caso. */
+	static boolean isRootUid(final String idOutput) {
+		return idOutput != null && "0".equals(idOutput.trim()); //$NON-NLS-1$
+	}
+
 	/** Obtiene los directorios de usuario sobre los que se tengan permiso. Si tenemos permisos
 	 * de administrador, devolver&aacute; el listado completo de directorios, si no devolver&aacute;
 	 * s&oacute;lo el del usuario local.
@@ -238,7 +245,7 @@ final class RestoreConfigLinux implements RestoreConfig {
 			final byte[] out = new byte[100];
 			try (final InputStream resIs = p.getInputStream();) {
 				final int r = resIs.read(out);
-				if (r <= 0 || !"0".equals(new String(out, 0, r))) { //$NON-NLS-1$
+				if (r <= 0 || !isRootUid(new String(out, 0, r))) {
 					searchAllUser = false;
 				}
 			}

@@ -18,7 +18,9 @@ import java.io.InputStreamReader;
 import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -39,6 +41,19 @@ final class ConfiguratorFirefoxLinux {
 
 	private static final String PROFILES_INI_RELATIVE_PATH = ".mozilla/firefox/profiles.ini";//$NON-NLS-1$
 	private static final String PROFILES_INI_RELATIVE_PATH_UBUNTU_22 = "snap/firefox/common/.mozilla/firefox/profiles.ini"; //$NON-NLS-1$
+	// Directorio de Firefox 147 y superiores
+	private static final String PROFILES_INI_RELATIVE_PATH_XDG = ".config/mozilla/firefox/profiles.ini"; //$NON-NLS-1$
+
+	/** Rutas relativas al directorio del usuario en las que puede encontrarse un
+	 * fichero <i>profiles.ini</i> de Mozilla. Se comprueban <b>todas</b>, no solo
+	 * la primera que exista: en un mismo sistema pueden convivir la
+	 * instalaci&oacute;n Snap y la nativa, cada una con sus propios perfiles, y el
+	 * certificado de CA debe quedar instalado en los de las dos. */
+	private static final String[] PROFILES_INI_RELATIVE_PATHS = new String[] {
+			PROFILES_INI_RELATIVE_PATH_UBUNTU_22,
+			PROFILES_INI_RELATIVE_PATH_XDG,
+			PROFILES_INI_RELATIVE_PATH
+	};
 
 	private static final String NSS_CHROME_PATH = "/.pki/nssdb"; //$NON-NLS-1$
 	private static final String NSS_CHROMIUM_PATH = "/snap/chromium/current/.pki/nssdb"; //$NON-NLS-1$
@@ -74,7 +89,7 @@ final class ConfiguratorFirefoxLinux {
 	 * @param dir Directorio del perfil o del almac&eacute;n.
 	 * @return <code>true</code> si el directorio ya tiene un almac&eacute;n NSS,
 	 *         <code>false</code> en caso contrario. */
-	private static boolean hasNssKeyStore(final File dir) {
+	static boolean hasNssKeyStore(final File dir) {
 		for (final String keystoreFile : NSS_KEYSTORE_FILES) {
 			if (new File(dir, keystoreFile).isFile()) {
 				return true;
@@ -266,7 +281,7 @@ final class ConfiguratorFirefoxLinux {
 	 * @throws IOException Cuando ocurre un error en el tratamiento de datos.
 	 * @throws GeneralSecurityException Cuando ocurre un error en la inserci&oacute;n del certificado en el KeyStore.
 	 */
-	private static void writeScriptsToMozillaKeyStore(
+	static void writeScriptsToMozillaKeyStore(
 												final String certUtilAbsolutePath,
 			                                    final File certDir,
 			                                    final List<File> profilesDir,
@@ -285,6 +300,15 @@ final class ConfiguratorFirefoxLinux {
 			// que no ha hecho el.
 			if (!hasNssKeyStore(profileDir)) {
 				LOGGER.info("Se omite un perfil de Mozilla sin almacen NSS inicializado: " //$NON-NLS-1$
+						+ profileDir.getAbsolutePath());
+				continue;
+			}
+
+			// Un almacen con contrasena maestra haria que certutil se quedara esperandola y
+			// colgara la instalacion. Se omite el perfil de los dos scripts; lo cubre el paso por usuario.
+			// Si no se puede determinar, tambien se omite.
+			if (ConfiguratorFirefoxCommon.isNssDbPasswordProtected(certUtilAbsolutePath, profileDir)) {
+				LOGGER.info("Se omite un perfil de Mozilla con almacen NSS protegido por contrasena o no comprobable: " //$NON-NLS-1$
 						+ profileDir.getAbsolutePath());
 				continue;
 			}
@@ -349,14 +373,15 @@ final class ConfiguratorFirefoxLinux {
 	/** Obtiene todos los perfiles de Mozilla para los usuarios indicado.
 	 * @param userDirs Directorios de usuario.
 	 * @return Listado de directorios de perfil de Mozilla. */
-	private static List<File> getProfiles(final String[] userDirs) {
+	static List<File> getProfiles(final String[] userDirs) {
 
 		final List <File> mozillaProfilesIniPaths = getMozillaProfilesIniPaths(userDirs);
 		if (mozillaProfilesIniPaths == null || mozillaProfilesIniPaths.isEmpty()) {
 			return null;
 		}
 
-		final List<File> profileDirs = new ArrayList<>();
+		// Sin duplicados por ruta canonica: las rutas pueden ser enlaces simbolicas entre si
+		final Set<File> profileDirs = new LinkedHashSet<>();
 		for (final File profilesIniFile : mozillaProfilesIniPaths){
 			String line;
 			try (
@@ -375,7 +400,7 @@ final class ConfiguratorFirefoxLinux {
 							)
 						);
 						if (profileDir.isDirectory()){
-							profileDirs.add(profileDir);
+							profileDirs.add(profileDir.getCanonicalFile());
 						}
 					}
 				}
@@ -384,23 +409,20 @@ final class ConfiguratorFirefoxLinux {
 				LOGGER.warning("Error al buscar los directorios de perfiles de Firefox: " + e); //$NON-NLS-1$
 			}
 		}
-		return profileDirs;
+		return new ArrayList<>(profileDirs);
 	}
 
 	/** Devuelve un listado con los ficheros <i>profiles.ini</i> de Mozilla.
 	 * @param userDirs Listado de rutas de los directorios de usuarios del sistema.
 	 * @return Listado de ficheros <i>profiles.ini</i>. */
-	private static List<File> getMozillaProfilesIniPaths(final String[] userDirs){
+	static List<File> getMozillaProfilesIniPaths(final String[] userDirs){
 
 		final List<File> profilesIniFiles = new ArrayList<>();
 		for (final String userDir : userDirs){
 
-			File mozillaPath = new File(userDir, PROFILES_INI_RELATIVE_PATH_UBUNTU_22);
-			if (mozillaPath.isFile()) {
-				profilesIniFiles.add(mozillaPath);
-			} else {
-				mozillaPath = new File(userDir, PROFILES_INI_RELATIVE_PATH);
-				if (mozillaPath.isFile()){
+			for (final String relativePath : PROFILES_INI_RELATIVE_PATHS) {
+				final File mozillaPath = new File(userDir, relativePath);
+				if (mozillaPath.isFile()) {
 					profilesIniFiles.add(mozillaPath);
 				}
 			}

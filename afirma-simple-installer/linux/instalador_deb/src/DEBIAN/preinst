@@ -1,9 +1,7 @@
-#!/bin/sh
-# Cerramos el navegador Firefox para instalar correctamente los certificados
-if pgrep firefox; then
-pkill firefox;
-fi
+#!/bin/bash
+aviso() { echo "autofirma $0: AVISO: $*" >&2; }
 
 # Creamos los directorios necesarios para no obtener errores durante la instalacion
-mkdir -p /root/.local/share/applications/
-mkdir -p /root/.config/
+mkdir -p /root/.local/share/applications/ || aviso "no se pudo crear /root/.local/share/applications/"
+mkdir -p /root/.config/ || aviso "no se pudo crear /root/.config/"
+exit 0

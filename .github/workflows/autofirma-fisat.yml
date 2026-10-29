@@ -1,0 +1,91 @@
+name: autofirma-fisat
+
+on:
+  pull_request:
+    branches: [fisat]
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Dependencias del sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libnss3-tools openssl python3 jq shellcheck desktop-file-utils lintian fakeroot
+      - name: Tests Java
+        run: |
+          mvn -B -ntp -P env-dev,autofirma \
+            -pl afirma-simple,afirma-ui-simple-configurator,afirma-ui-core-jse-keystores -am test \
+            -Dtest='AfirmaWebSocketServerTest,SecureSocketUtilsTest,ServiceInvocationManagerTest,TestRestoreConfigFirefox,CertificateSelectionPanelTest,TestConfiguratorLinuxUsers,TestConfiguratorFirefoxLinux,TestConfiguratorFirefoxCommon,TestCertUtil' \
+            -Dsurefire.failIfNoSpecifiedTests=false -DfailIfNoTests=false
+      - name: Tests de shell
+        run: bash afirma-simple-installer/linux/instalador_deb/tests/run.sh
+
+  deb:
+    needs: pruebas
+    if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref_name, '+fisat')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Dependencias del sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libnss3-tools openssl python3 jq shellcheck desktop-file-utils lintian fakeroot
+      - name: Validar el tag contra la versión del proyecto
+        run: |
+          re='^v([0-9]+\.[0-9]+\.[0-9]+)\+fisat([0-9]+)$'
+          if ! [[ $GITHUB_REF_NAME =~ $re ]]; then
+            echo "Tag no válido '$GITHUB_REF_NAME': se espera vX.Y.Z+fisatN" >&2
+            exit 1
+          fi
+          pom=$(mvn -q -B -ntp help:evaluate -Dexpression=project.version -DforceStdout)
+          if [ "${BASH_REMATCH[1]}" != "$pom" ]; then
+            echo "El tag ($GITHUB_REF_NAME) no coincide con la versión del pom ($pom)" >&2
+            exit 1
+          fi
+      - name: Build de JAR
+        run: |
+          mvn -B -ntp -DskipTests -P env-dev,env-install \
+            -pl afirma-simple,afirma-ui-simple-configurator -am clean package
+      - name: Comprobar que las clases salen del reactor
+        run: |
+          c=es/gob/afirma/standalone/protocol/AfirmaWebSocketServer.class
+          cmp <(unzip -p afirma-simple/target/autofirma.jar "$c") afirma-simple/target/classes/"$c"
+          echo REACTOR_OK
+      - name: Construir y verificar el paquete
+        run: |
+          D=afirma-simple-installer/linux/instalador_deb
+          "$D/construir_deb.sh" "${GITHUB_REF_NAME#v}" dist \
+            afirma-simple/target/autofirma.jar \
+            afirma-ui-simple-configurator/target/autofirmaConfigurador.jar
+          "$D/verificar_paquete.sh" dist/*.deb
+      - name: Publicar en Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.deb dist/*.sha256 \
+            --verify-tag --title "$GITHUB_REF_NAME" \
+            --notes "AutoFirma ${GITHUB_REF_NAME#v} (fork FISAT)"

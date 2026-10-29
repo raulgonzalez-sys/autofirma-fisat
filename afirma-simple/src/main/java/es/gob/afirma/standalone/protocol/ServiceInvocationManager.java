@@ -151,14 +151,18 @@ public final class ServiceInvocationManager {
 	/** Intenta realizar una conexi&oacute; por <i>socket</i> en los puertos que se pasan por par&aacute;metro.
 	 * @param ports Puertos a probar.
 	 * @param socket <i>Socket</i> que se intenta conectar.
-	 * @return El <code>SSLServerSocket</code> ya creado en el primer puerto encontrado disponible.
+	 * @return El <code>SSLServerSocket</code> ya creado en el primer puerto encontrado disponible,
+	 *         escuchando solo en la interfaz de loopback (127.0.0.1).
 	 * @throws IOException Si ocurren errores durante el intento. */
-	private static SSLServerSocket tryPorts(final int[] ports, final SSLServerSocketFactory socket) throws IOException {
+	static SSLServerSocket tryPorts(final int[] ports, final SSLServerSocketFactory socket) throws IOException {
 		checkNullParameter(ports, "La lista de puertos no puede ser nula"); //$NON-NLS-1$
 		checkNullParameter(socket, "El socket servidor no puede ser nulo"); //$NON-NLS-1$
 		for (final int port : ports) {
 			try {
-				final SSLServerSocket ssocket = (SSLServerSocket) socket.createServerSocket(port);
+				// Solo 127.0.0.1, como el servidor websocket
+				final SSLServerSocket ssocket = (SSLServerSocket) socket.createServerSocket(
+					port, 0, AfirmaWebSocketServer.getBindAddress(port).getAddress()
+				);
 				LOGGER.info("Establecido el puerto " + port + " para el servicio Autofirma"); //$NON-NLS-1$ //$NON-NLS-2$
 				return ssocket;
 			}

@@ -9,14 +9,12 @@
 
 package es.gob.afirma.standalone.protocol;
 
-import java.net.InetAddress;
 import java.util.Collections;
 
 import org.java_websocket.WebSocket;
 
 import es.gob.afirma.core.ErrorCode;
 import es.gob.afirma.core.misc.protocol.ProtocolVersion;
-import es.gob.afirma.standalone.SimpleErrorCode;
 
 /**
  * Servidor para la comunicaci&oacute;n por <i>WebSocket</i> acorde a la versi&oacute;n 4
@@ -27,16 +25,8 @@ public final class AfirmaWebSocketServerV4Sup extends AfirmaWebSocketServer {
 	/** Prefijo de las peticiones de eco. */
 	private static final String ECHO_REQUEST_PREFIX = "echo="; //$NON-NLS-1$
 
-	/** Sufijo de las peticiones de eco. */
-	private static final String ECHO_REQUEST_SUFFIX = "@EOF"; //$NON-NLS-1$
-
-	private static final String IDSESSION_PARAM_PREFIX = "idsession="; //$NON-NLS-1$
-
 	/** Respuesta que se debe enviar ante las peticiones de echo correctas. */
 	private static final String ECHO_OK_RESPONSE = "OK"; //$NON-NLS-1$
-
-	/** IP local. */
-	private static final String LOCALHOST_ADDRESS = "127.0.0.1"; //$NON-NLS-1$
 
 	/** Uno de los prefijos que puede presentar el mensaje de invocaci&oacute;n de una firma de lote. Versi&oacute;n 1. */
 	private static final String HEADER_BATCH_1 = "afirma://batch?"; //$NON-NLS-1$
@@ -64,20 +54,10 @@ public final class AfirmaWebSocketServerV4Sup extends AfirmaWebSocketServer {
 	public void onMessage(final WebSocket ws, final String message) {
 		LOGGER.info("Recibimos una peticion en el socket del puerto " + getAddress().getPort()); //$NON-NLS-1$
 
-		// Comprobamos que la peticion haya llegado del mismo equipo
-		final InetAddress remoteAddress = ws.getRemoteSocketAddress().getAddress();
-		if (remoteAddress == null || !isLocalAddress(remoteAddress)) {
-			LOGGER.warning("Peticion al socket desde IP externa o sin identificar: " + remoteAddress); //$NON-NLS-1$
-			final String errorResponse = getErrorMessage(SimpleErrorCode.Communication.EXTERNAL_REQUEST, this.protocol);
-			broadcast(errorResponse, Collections.singletonList(ws));
-			return;
-		}
-
-		// Si se proporciono un ID de sesion al crear el socket y el ID del
-		// mensaje enviado no coincide con el mismo, ignoraremos la peticion
-		if (this.sessionId != null && !this.sessionId.equals(getSessionId(message))) {
-			LOGGER.warning("La peticion no incluia el id de sesion correcto"); //$NON-NLS-1$
-			final String errorResponse = getErrorMessage(SimpleErrorCode.Request.INVALID_SESSION_ID, this.protocol);
+		// Comprobamos el origen y el id de sesion de la peticion
+		final ErrorCode requestError = checkRequest(ws.getRemoteSocketAddress(), this.sessionId, message);
+		if (requestError != null) {
+			final String errorResponse = getErrorMessage(requestError, this.protocol);
 			broadcast(errorResponse, Collections.singletonList(ws));
 			return;
 		}
@@ -114,44 +94,10 @@ public final class AfirmaWebSocketServerV4Sup extends AfirmaWebSocketServer {
 	}
 
 	/**
-	 * Comprueba que una direcci&oacute;n de red sea la 127.0.0.1.
-	 * @param address Direcci&oacute;n de red.
-	 * @return {@code true} si la direccion de red es la 127.0.0.1, {@code false} en caso contrario.
-	 */
-	private static boolean isLocalAddress(final InetAddress address) {
-		return address != null && LOCALHOST_ADDRESS.equals(address.getHostAddress());
-	}
-
-	/**
 	 * Indica si el m&eacute;todo debe de tratar la operaci&oacute;n como as&iacute;ncrona o no.
 	 * @param isAsyncOp {@code true} si se desea que se trate la operacion como as&iacute;ncrona.
 	 */
 	public void setAsyncOperation(final boolean isAsyncOp) {
 		this.isAsyncOperation = isAsyncOp;
-	}
-
-	/**
-	 * Devuelve el valor del par&aacute;metro "idsession" del mensaje.
-	 * @param message Mensaje.
-	 * @return Par&aacute;metro "idsession" o {@code null} si no se encontr&oacute;.
-	 */
-	private static String getSessionId(final String message) {
-		String id = null;
-		final int idx = message.indexOf(IDSESSION_PARAM_PREFIX);
-		if (idx > -1) {
-			final int startIdx = idx + IDSESSION_PARAM_PREFIX.length();
-			final int endIdx = message.indexOf("&", startIdx); //$NON-NLS-1$
-			if (endIdx > -1) {
-				id = message.substring(startIdx, endIdx);
-			}
-			else {
-				id = message.substring(startIdx);
-				if (id.endsWith(ECHO_REQUEST_SUFFIX)) {
-					id = id.substring(0, id.length() - ECHO_REQUEST_SUFFIX.length());
-				}
-			}
-		}
-
-		return id;
 	}
 }
