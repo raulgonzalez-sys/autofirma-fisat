@@ -156,7 +156,7 @@ chk_xpi() {
 	[ "$obtenido" = "$esperado" ] || { echo "sha256 del xpi: $obtenido (esperado $esperado)"; return 1; }
 }
 
-# fisat-politicas.py ejecutable; postinst lo llama con add; prerm con remove solo en remove|deconfigure
+# fisat-politicas.py ejecutable; postinst lo llama con add; prerm con remove --delete-if-empty solo en remove|deconfigure
 # (postrm no puede: dpkg ya ha borrado el ayudante) y postrm no lo llama
 chk_politicas() {
 	local perm fuera dentro
@@ -169,6 +169,7 @@ chk_politicas() {
 	dentro=$(awk '/^[[:space:]]*remove\|deconfigure\)/ {d=1} d==1 && /fisat-politicas\.py[[:space:]]+remove/ {print} /;;/ {d=0}' "$X/DEBIAN/prerm")
 	[ -n "$dentro" ] || { echo "prerm no llama a fisat-politicas.py remove dentro de remove|deconfigure"; return 1; }
 	[ -z "$fuera" ] || { echo "prerm llama a remove fuera de remove|deconfigure: $fuera"; return 1; }
+	grep -q -- '--delete-if-empty' <<<"$dentro" || { echo "prerm llama a remove sin --delete-if-empty: $dentro"; return 1; }
 }
 
 # El lanzador del paquete arranca con exec java y pasa antes por fisat-usuario.sh
