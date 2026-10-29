@@ -150,6 +150,13 @@ Clases que ejecuta el job `pruebas` (`-Dtest` del workflow). JUnit 4, nombre
 - Forzar el de Java: `AUTOFIRMA_FISAT_DIALOGOS=java` en el entorno o
   `-Des.gob.afirma.fisat.dialogos=java` en la JVM.
 - El paquete recomienda (`Recommends`, no `Depends`) `kdialog | zenity`.
+- Mientras el diálogo nativo está abierto, las ventanas de AutoFirma no
+  admiten clics ni teclado (como con el `JFileChooser` modal) pero siguen
+  repintándose: el proceso se espera en un hilo auxiliar con un bucle
+  secundario de eventos.
+- Filtros de `kdialog`: `Desc (*.a *.A)|Todos (*)`; `kdialog` cambia `|` por
+  salto de línea y Qt separa ahí los filtros (comprobado en el código de
+  `kdialog` v25.04.0, `setFileDialogFilter`).
 - Limitaciones: el diálogo nativo no tiene ventana padre; con `kdialog` puede
   salir un doble aviso de sobrescritura (el de KDE y el de AutoFirma); al
   guardar sin extensión se añade la del filtro por defecto (kdialog y zenity no

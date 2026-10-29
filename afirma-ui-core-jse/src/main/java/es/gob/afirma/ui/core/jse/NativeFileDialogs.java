@@ -1,5 +1,12 @@
 package es.gob.afirma.ui.core.jse;
 
+import java.awt.Component;
+import java.awt.Dialog;
+import java.awt.EventQueue;
+import java.awt.GraphicsEnvironment;
+import java.awt.SecondaryLoop;
+import java.awt.Toolkit;
+import java.awt.Window;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
@@ -12,8 +19,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Logger;
 
+import javax.swing.JDialog;
+import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 
 import es.gob.afirma.core.misc.Platform;
@@ -128,13 +138,16 @@ final class NativeFileDialogs {
 	 * @param start Fichero o carpeta inicial.
 	 * @param filters Filtros de fichero o <code>null</code>.
 	 * @param defaultFilter Filtro por defecto o <code>null</code>.
+	 * @param parent Componente padre o <code>null</code>; sus ventanas quedan bloqueadas mientras
+	 *               el di&aacute;logo est&aacute; abierto.
 	 * @return Resultado del di&aacute;logo. */
 	Result show(final Mode mode,
 			    final boolean multi,
 			    final String title,
 			    final File start,
 			    final List<GenericFileFilter> filters,
-			    final GenericFileFilter defaultFilter) {
+			    final GenericFileFilter defaultFilter,
+			    final Component parent) {
 		try {
 			final Tool tool = chooseTool(this.os, this.env, this.property);
 			if (tool == null) {
@@ -165,7 +178,7 @@ final class NativeFileDialogs {
 					orderFilters(filters, defaultFilter, allFilesText));
 
 			LOGGER.info("Se usa el dialogo de ficheros nativo: " + executable.getPath()); //$NON-NLS-1$
-			return run(command, multi && mode == Mode.OPEN);
+			return runWithoutBlockingEdt(command, multi && mode == Mode.OPEN, parent);
 		}
 		catch (final RuntimeException e) {
 			LOGGER.warning("Error en el dialogo de ficheros nativo, se usara el de Java: " + e); //$NON-NLS-1$
@@ -314,13 +327,14 @@ final class NativeFileDialogs {
 			if (start != null) {
 				command.add(start.getPath());
 				if (!filters.isEmpty()) {
+					// kdialog cambia '|' por salto de linea y Qt separa ahi los filtros si no hay ';;'
 					final StringBuilder sb = new StringBuilder();
 					for (final GenericFileFilter f : filters) {
 						if (sb.length() > 0) {
 							sb.append('|');
 						}
 						final String patterns = patterns(f);
-						sb.append(description(f, patterns).replace("\\", "\\\\")) //$NON-NLS-1$ //$NON-NLS-2$
+						sb.append(description(f, patterns).replaceAll(";{2,}", ";").replace("\\", "\\\\")) //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
 						  .append(" (").append(patterns).append(')'); //$NON-NLS-1$
 					}
 					command.add(sb.toString());
@@ -383,7 +397,7 @@ final class NativeFileDialogs {
 			}
 			desc = lower.isEmpty() ? patterns : join(lower);
 		}
-		return desc.replace('|', '/');
+		return desc.replace('|', '/').replace('\r', ' ').replace('\n', ' ').trim();
 	}
 
 	private static String join(final Iterable<String> parts) {
@@ -462,6 +476,120 @@ final class NativeFileDialogs {
 			process.destroy();
 			Thread.currentThread().interrupt();
 			return CANCELLED;
+		}
+	}
+
+	/** Ejecuta la herramienta nativa como {@link #run(List, boolean)} sin bloquear el hilo de
+	 * eventos de AWT. Si se llama desde ese hilo, el proceso se espera en un hilo auxiliar
+	 * mientras un bucle secundario sigue atendiendo eventos (repintado), y un di&aacute;logo
+	 * modal m&iacute;nimo bloquea la entrada en las ventanas de la aplicaci&oacute;n, como
+	 * har&iacute;a el <code>JFileChooser</code>. Desde otro hilo se espera en el mismo hilo.
+	 * @param command L&iacute;nea de &oacute;rdenes.
+	 * @param multi Si se admiten varios ficheros en la salida.
+	 * @param parent Componente padre o <code>null</code>.
+	 * @return Resultado del di&aacute;logo. */
+	static Result runWithoutBlockingEdt(final List<String> command, final boolean multi, final Component parent) {
+		if (!EventQueue.isDispatchThread()) {
+			return run(command, multi);
+		}
+		final SecondaryLoop loop = Toolkit.getDefaultToolkit().getSystemEventQueue().createSecondaryLoop();
+		final JDialog blocker = createBlocker(parent);
+		final AtomicReference<Result> result = new AtomicReference<>();
+
+		// El cierre se encola tras mostrar el bloqueo, asi que siempre llega despues de enter()
+		final Runnable finish = new Runnable() {
+			@Override
+			public void run() {
+				if (blocker != null) {
+					blocker.dispose();
+				}
+				loop.exit();
+			}
+		};
+		final Thread worker = new Thread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					result.set(NativeFileDialogs.run(command, multi));
+				}
+				finally {
+					EventQueue.invokeLater(finish);
+				}
+			}
+		}, "AutoFirma-dialogo-ficheros-nativo"); //$NON-NLS-1$
+		worker.setDaemon(true);
+
+		if (blocker != null) {
+			EventQueue.invokeLater(new Runnable() {
+				@Override
+				public void run() {
+					try {
+						blocker.setVisible(true);
+					}
+					catch (final RuntimeException e) {
+						LOGGER.warning("No se pudo bloquear la ventana durante el dialogo nativo: " + e); //$NON-NLS-1$
+					}
+				}
+			});
+		}
+		worker.start();
+
+		if (!loop.enter()) {
+			// No deberia ocurrir en el hilo de eventos; se espera sin atender eventos
+			joinUninterruptibly(worker);
+		}
+		if (blocker != null) {
+			blocker.dispose();
+		}
+		final Result r = result.get();
+		return r != null ? r : UNAVAILABLE;
+	}
+
+	/** Crea un di&aacute;logo modal, sin decoraci&oacute;n ni foco, que bloquea la entrada en las
+	 * ventanas de la aplicaci&oacute;n mientras el di&aacute;logo nativo est&aacute; abierto.
+	 * @param parent Componente padre o <code>null</code>.
+	 * @return Di&aacute;logo sin mostrar, o <code>null</code> en modo headless o si no se puede crear. */
+	private static JDialog createBlocker(final Component parent) {
+		if (GraphicsEnvironment.isHeadless()) {
+			return null;
+		}
+		try {
+			final Window owner = parent == null || parent instanceof Window
+					? (Window) parent
+					: SwingUtilities.getWindowAncestor(parent);
+			final JDialog blocker = new JDialog(owner, Dialog.ModalityType.APPLICATION_MODAL);
+			blocker.setUndecorated(true);
+			blocker.setFocusableWindowState(false);
+			blocker.setAutoRequestFocus(false);
+			blocker.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
+			blocker.setSize(1, 1);
+			blocker.setLocationRelativeTo(owner);
+			try {
+				blocker.setOpacity(0f);
+			}
+			catch (final RuntimeException e) {
+				// Sin transparencia queda un punto de 1x1 que no molesta
+			}
+			return blocker;
+		}
+		catch (final RuntimeException e) {
+			LOGGER.warning("No se pudo crear el bloqueo de ventana del dialogo nativo: " + e); //$NON-NLS-1$
+			return null;
+		}
+	}
+
+	private static void joinUninterruptibly(final Thread thread) {
+		boolean interrupted = false;
+		while (thread.isAlive()) {
+			try {
+				thread.join();
+			}
+			catch (final InterruptedException e) {
+				interrupted = true;
+			}
+		}
+		if (interrupted) {
+			Thread.currentThread().interrupt();
 		}
 	}
 

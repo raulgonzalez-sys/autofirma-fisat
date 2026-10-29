@@ -8,6 +8,8 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import java.awt.EventQueue;
+import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -17,8 +19,12 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.Assume;
+import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -39,6 +45,13 @@ public final class NativeFileDialogsTest {
 	private static final String TODOS = "Todos los archivos"; //$NON-NLS-1$
 	private static final String KD = "/usr/bin/kdialog"; //$NON-NLS-1$
 	private static final String ZE = "/usr/bin/zenity"; //$NON-NLS-1$
+
+	/** Fuerza el modo headless antes de tocar AWT para no abrir ventanas en el escritorio. */
+	@BeforeClass
+	public static void headless() {
+		System.setProperty("java.awt.headless", "true"); //$NON-NLS-1$ //$NON-NLS-2$
+		assertTrue(GraphicsEnvironment.isHeadless());
+	}
 
 	/** Directorio temporal para los ejecutables falsos. */
 	@Rule
@@ -291,6 +304,15 @@ public final class NativeFileDialogsTest {
 		assertTrue(last(c), last(c).startsWith("Texto/log \\\\ raro (*.txt *.TXT *.log *.LOG)|")); //$NON-NLS-1$
 	}
 
+	/** kdialog: ni ';;' ni saltos de linea en la descripcion, que Qt tomaria como separadores de filtros. */
+	@Test
+	public void testKdialogDescripcionSinSeparadoresDeQt() {
+		final GenericFileFilter f = new GenericFileFilter(new String[] { "txt" }, "Texto;;;log\nraro\r"); //$NON-NLS-1$ //$NON-NLS-2$
+		final List<String> c = NativeFileDialogs.buildCommand(Tool.KDIALOG, KD, Mode.OPEN, false, "Abrir", new File("/home/ana"), //$NON-NLS-1$ //$NON-NLS-2$
+				NativeFileDialogs.orderFilters(singletonList(f), f, TODOS));
+		assertEquals("Texto;log raro (*.txt *.TXT)|Todos los archivos (*)", last(c)); //$NON-NLS-1$
+	}
+
 	/** kdialog: sin descripcion se usan los patrones. */
 	@Test
 	public void testKdialogDescripcionNula() {
@@ -336,6 +358,14 @@ public final class NativeFileDialogsTest {
 		final GenericFileFilter f = new GenericFileFilter(new String[] { "txt" }, "Texto|log"); //$NON-NLS-1$ //$NON-NLS-2$
 		assertTrue(NativeFileDialogs.buildCommand(Tool.ZENITY, ZE, Mode.OPEN, false, "Abrir", new File("/home/ana"), //$NON-NLS-1$ //$NON-NLS-2$
 				NativeFileDialogs.orderFilters(singletonList(f), f, TODOS)).contains("--file-filter=Texto/log | *.txt *.TXT")); //$NON-NLS-1$
+	}
+
+	/** zenity: sin saltos de linea en la descripcion. */
+	@Test
+	public void testZenityDescripcionSinSaltosDeLinea() {
+		final GenericFileFilter f = new GenericFileFilter(new String[] { "txt" }, "Texto\nlog"); //$NON-NLS-1$ //$NON-NLS-2$
+		assertTrue(NativeFileDialogs.buildCommand(Tool.ZENITY, ZE, Mode.OPEN, false, "Abrir", new File("/home/ana"), //$NON-NLS-1$ //$NON-NLS-2$
+				NativeFileDialogs.orderFilters(singletonList(f), f, TODOS)).contains("--file-filter=Texto log | *.txt *.TXT")); //$NON-NLS-1$
 	}
 
 	/** Nunca se usa --attach ni --confirm-overwrite. */
@@ -498,5 +528,65 @@ public final class NativeFileDialogsTest {
 		assertEquals(Status.ACCEPTED, r.status);
 		assertEquals(3000, r.files.length);
 		assertEquals(new File("/tmp/directorio-con-nombre-largo/fichero-02999.pdf"), r.files[2999]); //$NON-NLS-1$
+	}
+
+	// Espera desde el hilo de eventos de AWT
+
+	/** Con el dialogo nativo abierto el hilo de eventos sigue atendiendo eventos (repintado).
+	 * @throws Exception En cualquier error. */
+	@Test(timeout = 60000)
+	public void testEnHiloDeEventosNoSeBloquea() throws Exception {
+		final File iniciado = new File(this.tmp.getRoot(), "iniciado"); //$NON-NLS-1$
+		final File libera = new File(this.tmp.getRoot(), "libera"); //$NON-NLS-1$
+		final File s = fake(this.tmp.getRoot(), "lento", //$NON-NLS-1$
+				"touch '" + iniciado + "'\n" //$NON-NLS-1$ //$NON-NLS-2$
+				+ "i=0; while [ ! -e '" + libera + "' ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done\n" //$NON-NLS-1$ //$NON-NLS-2$
+				+ "printf '%s\\n' '/tmp/A\u00f1o 2026/lento.pdf'\nexit 0"); //$NON-NLS-1$
+		final AtomicReference<Result> resultado = new AtomicReference<>();
+		final CountDownLatch terminado = new CountDownLatch(1);
+		EventQueue.invokeLater(new Runnable() {
+			@Override
+			public void run() {
+				resultado.set(NativeFileDialogs.runWithoutBlockingEdt(singletonList(s.getPath()), false, null));
+				terminado.countDown();
+			}
+		});
+		final long limite = System.currentTimeMillis() + 10000;
+		while (!iniciado.exists() && System.currentTimeMillis() < limite) {
+			Thread.sleep(20);
+		}
+		assertTrue("El dialogo falso no llego a arrancar", iniciado.exists()); //$NON-NLS-1$
+
+		final CountDownLatch atendido = new CountDownLatch(1);
+		EventQueue.invokeLater(new Runnable() {
+			@Override
+			public void run() {
+				atendido.countDown();
+			}
+		});
+		final boolean hiloDeEventosLibre = atendido.await(5, TimeUnit.SECONDS);
+		final boolean seguiaAbierto = terminado.getCount() == 1;
+		Files.write(libera.toPath(), new byte[0]);
+
+		assertTrue("El dialogo falso no termino", terminado.await(40, TimeUnit.SECONDS)); //$NON-NLS-1$
+		assertTrue("El hilo de eventos quedo bloqueado con el dialogo abierto", hiloDeEventosLibre); //$NON-NLS-1$
+		assertTrue("La llamada volvio antes de cerrar el dialogo", seguiaAbierto); //$NON-NLS-1$
+		assertEquals(Status.ACCEPTED, resultado.get().status);
+		assertArrayEquals(new File[] { new File("/tmp/A\u00f1o 2026/lento.pdf") }, resultado.get().files); //$NON-NLS-1$
+	}
+
+	/** Desde el hilo de eventos, un ejecutable inexistente sigue dando no disponible.
+	 * @throws Exception En cualquier error. */
+	@Test(timeout = 30000)
+	public void testEnHiloDeEventosEjecutableInexistente() throws Exception {
+		final AtomicReference<Result> resultado = new AtomicReference<>();
+		EventQueue.invokeAndWait(new Runnable() {
+			@Override
+			public void run() {
+				resultado.set(NativeFileDialogs.runWithoutBlockingEdt(
+						singletonList(NativeFileDialogsTest.this.tmp.getRoot() + "/no-existe"), false, null)); //$NON-NLS-1$
+			}
+		});
+		assertEquals(Status.UNAVAILABLE, resultado.get().status);
 	}
 }

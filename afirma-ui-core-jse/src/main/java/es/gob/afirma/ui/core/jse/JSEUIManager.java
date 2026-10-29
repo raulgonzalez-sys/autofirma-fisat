@@ -672,7 +672,8 @@ public class JSEUIManager implements AOUIManager {
 				dialogTitle,
 				NativeFileDialogs.startPath(currentDir, filename, get(PREFERENCE_DIRECTORY, null), System.getProperty("user.home")), //$NON-NLS-1$
 				loadFilter == null ? null : Collections.singletonList(loadFilter),
-				loadFilter);
+				loadFilter,
+				parentComponent);
         if (nativeResult.status == NativeFileDialogs.Status.CANCELLED) {
         	throw new AOCancelledOperationException();
         }
@@ -791,7 +792,8 @@ public class JSEUIManager implements AOUIManager {
             			dialogTitle,
             			NativeFileDialogs.startPath(currentDir, selectedFile, get(PREFERENCE_DIRECTORY, null), System.getProperty("user.home")), //$NON-NLS-1$
             			filters,
-            			defaultFilter);
+            			defaultFilter,
+            			parentComponent);
             	if (nativeResult.status == NativeFileDialogs.Status.CANCELLED) {
             		throw new AOCancelledOperationException();
             	}
