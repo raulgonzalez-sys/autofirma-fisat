@@ -31,7 +31,7 @@ jobs:
         run: |
           mvn -B -ntp -P env-dev,autofirma \
             -pl afirma-simple,afirma-ui-simple-configurator,afirma-ui-core-jse-keystores -am test \
-            -Dtest='AfirmaWebSocketServerTest,SecureSocketUtilsTest,TestRestoreConfigFirefox,CertificateSelectionPanelTest,TestConfiguratorLinuxUsers,TestConfiguratorFirefoxLinux,TestConfiguratorFirefoxCommon,TestCertUtil' \
+            -Dtest='AfirmaWebSocketServerTest,SecureSocketUtilsTest,ServiceInvocationManagerTest,TestRestoreConfigFirefox,CertificateSelectionPanelTest,TestConfiguratorLinuxUsers,TestConfiguratorFirefoxLinux,TestConfiguratorFirefoxCommon,TestCertUtil' \
             -Dsurefire.failIfNoSpecifiedTests=false -DfailIfNoTests=false
       - name: Tests de shell
         run: bash afirma-simple-installer/linux/instalador_deb/tests/run.sh
