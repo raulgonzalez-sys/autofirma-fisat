@@ -58,8 +58,11 @@ final class RestoreConfigFirefox {
 	static final String DIR_CERTUTIL = "certutil"; //$NON-NLS-1$
 	private static final String LINUX_UNINSTALLSCRIPT_NAME = "uninstallRestore-"; //$NON-NLS-1$
 	private static final String LINUX_SCRIPT_NAME = "installRestore-"; //$NON-NLS-1$
-	private static final String LINUX_MOZILLA_PATH = "/.mozilla/firefox/profiles.ini";//$NON-NLS-1$
-	private static final String UBUNTU_22_MOZILLA_PATH = "/snap/firefox/common/.mozilla/firefox/profiles.ini"; //$NON-NLS-1$
+	private static final String[] LINUX_MOZILLA_PATHS = new String[] {
+		"/.mozilla/firefox/profiles.ini", //$NON-NLS-1$
+		"/.config/mozilla/firefox/profiles.ini", //$NON-NLS-1$
+		"/snap/firefox/common/.mozilla/firefox/profiles.ini" //$NON-NLS-1$
+	};
 	private static final String NSS_LINUX_CHROME_PATH = "/.pki/nssdb";//$NON-NLS-1$
 	//TODO: En Chromium ahora solo se instalara el certificado de confianza para el perfil activo
 	private static final String NSS_LINUX_CHROMIUM_PATH = "/snap/chromium/current/.pki/nssdb";//$NON-NLS-1$
@@ -826,12 +829,13 @@ final class RestoreConfigFirefox {
 	 * de firefox en Linux y en Windows.
 	 * @param users Listado de usuarios del sistema.
 	 * @return Listado de directorios donde se encuentra el fichero <i>profiles.ini</i>. */
-	private static List<File> getMozillaUsersProfilesPath(final List<String> users){
+	static List<File> getMozillaUsersProfilesPath(final List<String> users){
 		final List<String> pathProfiles = new ArrayList<>();
 		final List<File> path = new ArrayList<>();
 		if (Platform.OS.LINUX.equals(Platform.getOS())) {
-			pathProfiles.add(UBUNTU_22_MOZILLA_PATH);
-			pathProfiles.add(LINUX_MOZILLA_PATH);
+			for (final String p : LINUX_MOZILLA_PATHS) {
+				pathProfiles.add(p);
+			}
 		}
 		else if (Platform.OS.WINDOWS.equals(Platform.getOS())) {
 			pathProfiles.add(WINDOWS_MOZILLA_PATH);
