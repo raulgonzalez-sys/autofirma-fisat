@@ -28,6 +28,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.logging.Logger;
 import java.util.prefs.Preferences;
@@ -95,6 +96,9 @@ public class JSEUIManager implements AOUIManager {
 
 	/** Guarda el directorio actual. */
 	public static final String PREFERENCE_DIRECTORY = "currentDir"; //$NON-NLS-1$
+
+	/** Di&aacute;logos de ficheros nativos de Linux, que se consultan antes que el <code>JFileChooser</code>. */
+	NativeFileDialogs nativeDialogs = NativeFileDialogs.fromSystem();
 
 	/** Pregunta al usuario por una contrase&ntilde;a.
      * @param text Texto que se muestra en el di&aacute;logo para pedir la contrase&ntilde;a.
@@ -658,6 +662,25 @@ public class JSEUIManager implements AOUIManager {
 
         final Component parentComponent = parent instanceof Component ? (Component) parent : null;
 
+        // En Linux se intenta primero el dialogo nativo; si no esta disponible se usa el JFileChooser
+        final GenericFileFilter loadFilter = extensions != null && extensions.length > 0
+        		? new GenericFileFilter(extensions, description)
+				: null;
+        final NativeFileDialogs.Result nativeResult = this.nativeDialogs.show(
+        		selectDirectory ? NativeFileDialogs.Mode.DIRECTORY : NativeFileDialogs.Mode.OPEN,
+				multiSelect && !selectDirectory,
+				dialogTitle,
+				NativeFileDialogs.startPath(currentDir, filename, get(PREFERENCE_DIRECTORY, null), System.getProperty("user.home")), //$NON-NLS-1$
+				loadFilter == null ? null : Collections.singletonList(loadFilter),
+				loadFilter);
+        if (nativeResult.status == NativeFileDialogs.Status.CANCELLED) {
+        	throw new AOCancelledOperationException();
+        }
+        if (nativeResult.status == NativeFileDialogs.Status.ACCEPTED) {
+        	put(PREFERENCE_DIRECTORY, parentPath(nativeResult.files[0]));
+        	return nativeResult.files;
+        }
+
         UIManager.put("FileChooser.lookInLabelText", JSEUIMessages.getString("JSEUIManager.93") + ":"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
         UIManager.put("FileChooser.fileNameLabelText", JSEUIMessages.getString("JSEUIManager.94") + ":"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
         UIManager.put("FileChooser.openButtonText", JSEUIMessages.getString("JSEUIManager.96"));  //$NON-NLS-1$//$NON-NLS-2$
@@ -754,10 +777,36 @@ public class JSEUIManager implements AOUIManager {
         UIManager.put("FileChooser.cancelButtonText", JSEUIMessages.getString("JSEUIManager.97"));  //$NON-NLS-1$//$NON-NLS-2$
 
         boolean tryAgain = true;
+        boolean tryNative = true;
         File file = null;
         while (tryAgain) {
 
             tryAgain = false;
+
+            // En Linux se intenta primero el dialogo nativo; si no esta disponible se usa el JFileChooser
+            if (tryNative) {
+            	final NativeFileDialogs.Result nativeResult = this.nativeDialogs.show(
+            			NativeFileDialogs.Mode.SAVE,
+            			false,
+            			dialogTitle,
+            			NativeFileDialogs.startPath(currentDir, selectedFile, get(PREFERENCE_DIRECTORY, null), System.getProperty("user.home")), //$NON-NLS-1$
+            			filters,
+            			defaultFilter);
+            	if (nativeResult.status == NativeFileDialogs.Status.CANCELLED) {
+            		throw new AOCancelledOperationException();
+            	}
+            	if (nativeResult.status == NativeFileDialogs.Status.ACCEPTED) {
+            		file = NativeFileDialogs.addDefaultExtension(nativeResult.files[0].getCanonicalFile(), filters, defaultFilter);
+            		if (confirmAndSave(file, data, parentComponent) == null) {
+            			tryAgain = true;
+            			continue;
+            		}
+            		put(PREFERENCE_DIRECTORY, parentPath(file));
+            		return file;
+            	}
+            	tryNative = false;
+            }
+
             final JFileChooser fileChooser = new CustomFileChooserForSave();
 
             // Accesibilidad con textos fijos
@@ -791,7 +840,6 @@ public class JSEUIManager implements AOUIManager {
             // Configuramos el directorio y fichero por defecto
             configureDefaultDir(fileChooser, currentDir, selectedFile);
 
-            int selectedOption = JOptionPane.YES_OPTION;
             final int returnCode = fileChooser.showSaveDialog(parentComponent);
             switch(returnCode) {
 
@@ -817,53 +865,10 @@ public class JSEUIManager implements AOUIManager {
             			}
             		}
 
-            		// Si el fichero existe, se ofrece el sobreescribirlo
-	                if (file.exists()) {
-	                	selectedOption = showConfirmDialog(parentComponent,
-	                						JSEUIMessages.getString("JSEUIManager.77", file.getAbsolutePath()),  //$NON-NLS-1$
-	                						JSEUIMessages.getString("JSEUIManager.85"),  //$NON-NLS-1$
-	                						JOptionPane.YES_NO_CANCEL_OPTION,
-	                						JOptionPane.INFORMATION_MESSAGE);
-
-	                    if (selectedOption == JOptionPane.CANCEL_OPTION) {
-	                        LOGGER.info("Se ha cancelado la operacion de guardado."); //$NON-NLS-1$
-	                        throw new AOCancelledOperationException();
-	                    }
-	                    // Si se ha seleccionado la opcion YES (se desea
-	                    // sobreescribir) continuamos
-	                    // normalmente con el guardado del fichero
-	                }
-
-	                // Si no se desea sobreescribir, se vuelve a mostrar el dialogo
-	                // para que se seleccione un nuevo nombre
-	                if (selectedOption == JOptionPane.NO_OPTION) {
-	                    tryAgain = true;
-	                    break;
-	                }
-
-	                // Si se proporcionan datos, se guardan y se devuelve el fichero donde se ha hecho.
-	                // Si no se proporcionan datos, se devuelve el fichero seleccionado, permitiendo que
-	                // el guardado se haga externamente.
-	                if (data != null) {
-		                try (
-	                		final OutputStream fos = new FileOutputStream(file)
-	            		) {
-	                        fos.write(data);
-	                        fos.flush();
-	                    }
-	                    catch (final Exception ex) {
-	                        LOGGER.warning("No se pudo guardar la informacion en el fichero indicado: " + ex); //$NON-NLS-1$
-	                        showErrorMessage(
-	                            JSEUIMessages.getString("JSEUIManager.88"), //$NON-NLS-1$
-	                            JSEUIMessages.getString("JSEUIManager.89"), //$NON-NLS-1$
-	                            JOptionPane.ERROR_MESSAGE,
-	                            ex
-	                        );
-	                        // Volvemos a intentar guardar
-	                        tryAgain = true;
-	                        continue;
-	                    }
-	                }
+            		if (confirmAndSave(file, data, parentComponent) == null) {
+            			tryAgain = true;
+            			break;
+            		}
                     put(PREFERENCE_DIRECTORY, fileChooser.getCurrentDirectory().getPath());
                     return file;
 
@@ -874,6 +879,72 @@ public class JSEUIManager implements AOUIManager {
 
         // Devolvemos el path del fichero en el que se han guardado los datos
         return file;
+    }
+
+    /** Pide confirmaci&oacute;n si el fichero ya existe y, si se proporcionan datos, los escribe en &eacute;l.
+     * @param file Fichero elegido.
+     * @param data Datos a guardar o <code>null</code> si el guardado se hace externamente.
+     * @param parentComponent Componente padre de los di&aacute;logos.
+     * @return El fichero si se acept&oacute; (y se escribi&oacute;, si hab&iacute;a datos) o
+     *         <code>null</code> si hay que volver a mostrar el di&aacute;logo de guardado.
+     * @throws AOCancelledOperationException Si el usuario cancela. */
+    private File confirmAndSave(final File file, final byte[] data, final Component parentComponent) {
+
+    	int selectedOption = JOptionPane.YES_OPTION;
+
+    	// Si el fichero existe, se ofrece el sobreescribirlo
+    	if (file.exists()) {
+    		selectedOption = showConfirmDialog(parentComponent,
+    				JSEUIMessages.getString("JSEUIManager.77", file.getAbsolutePath()),  //$NON-NLS-1$
+    				JSEUIMessages.getString("JSEUIManager.85"),  //$NON-NLS-1$
+    				JOptionPane.YES_NO_CANCEL_OPTION,
+    				JOptionPane.INFORMATION_MESSAGE);
+
+    		if (selectedOption == JOptionPane.CANCEL_OPTION) {
+    			LOGGER.info("Se ha cancelado la operacion de guardado."); //$NON-NLS-1$
+    			throw new AOCancelledOperationException();
+    		}
+    		// Si se ha seleccionado la opcion YES (se desea
+    		// sobreescribir) continuamos
+    		// normalmente con el guardado del fichero
+    	}
+
+    	// Si no se desea sobreescribir, se vuelve a mostrar el dialogo
+    	// para que se seleccione un nuevo nombre
+    	if (selectedOption == JOptionPane.NO_OPTION) {
+    		return null;
+    	}
+
+    	// Si se proporcionan datos, se guardan y se devuelve el fichero donde se ha hecho.
+    	// Si no se proporcionan datos, se devuelve el fichero seleccionado, permitiendo que
+    	// el guardado se haga externamente.
+    	if (data != null) {
+    		try (
+    			final OutputStream fos = new FileOutputStream(file)
+    		) {
+    			fos.write(data);
+    			fos.flush();
+    		}
+    		catch (final Exception ex) {
+    			LOGGER.warning("No se pudo guardar la informacion en el fichero indicado: " + ex); //$NON-NLS-1$
+    			showErrorMessage(
+    				JSEUIMessages.getString("JSEUIManager.88"), //$NON-NLS-1$
+    				JSEUIMessages.getString("JSEUIManager.89"), //$NON-NLS-1$
+    				JOptionPane.ERROR_MESSAGE,
+    				ex
+    			);
+    			// Volvemos a intentar guardar
+    			return null;
+    		}
+    	}
+    	return file;
+    }
+
+    /** Carpeta que contiene un fichero, o el propio fichero si no tiene padre.
+     * @param file Fichero.
+     * @return Ruta de la carpeta. */
+    private static String parentPath(final File file) {
+    	return file.getParent() != null ? file.getParent() : file.getPath();
     }
 
     /** Configura un {@code JFileChooser} para que muestre por defecto un directorio y nombre de fichero.
