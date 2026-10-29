@@ -171,6 +171,33 @@ chk_politicas() {
 	[ -z "$fuera" ] || { echo "prerm llama a remove fuera de remove|deconfigure: $fuera"; return 1; }
 }
 
+# El lanzador del paquete arranca con exec java y pasa antes por fisat-usuario.sh
+chk_lanzador() {
+	local f=$X/usr/bin/autofirma
+	[ -f "$f" ] || { echo "falta ./usr/bin/autofirma"; return 1; }
+	grep -Eq '^[[:space:]]*exec java' "$f" || { echo "el lanzador no contiene 'exec java'"; return 1; }
+	grep -Fq 'fisat-usuario.sh' "$f" || { echo "el lanzador no menciona fisat-usuario.sh"; return 1; }
+}
+
+# Autostart de sesión: presente en ./etc/xdg/autostart/ y válido para desktop-file-validate
+chk_autostart() {
+	local f=autofirma-fisat-usuario.desktop salida
+	salida=$(rutas)
+	grep -Fxq "./etc/xdg/autostart/$f" <<<"$salida" || { echo "falta ./etc/xdg/autostart/$f"; return 1; }
+	salida=$(desktop-file-validate "$X/etc/xdg/autostart/$f" 2>&1) || { echo "$salida"; return 1; }
+	[ -z "$salida" ] || { echo "$salida"; return 1; }
+}
+
+# Paso por usuario y ayudante de políticas con modo 755
+chk_usuario() {
+	local f perm malos=""
+	for f in fisat-usuario.sh fisat-politicas.py; do
+		perm=$(listado | awk -v n="./usr/lib/Autofirma/$f" '$3 == n {print $1}')
+		[ "$perm" = "-rwxr-xr-x" ] || malos="$malos $f('$perm')"
+	done
+	[ -z "$malos" ] || { echo "ausentes o sin modo 755 en ./usr/lib/Autofirma/:$malos"; return 1; }
+}
+
 chk_maintainer_shellcheck() {
 	local s salida
 	for s in preinst postinst prerm postrm; do
