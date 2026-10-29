@@ -1,0 +1,9 @@
+# Etiquetas de error heredadas de upstream que esta fase no arregla
+# La descripcion de upstream empieza por el nombre del paquete
+description-starts-with-package-name
+# El fichero de preferencias de Firefox de /etc no se declara como conffile
+file-in-etc-not-marked-as-conffile
+# Paquete sin changelog en usr/share/doc
+no-changelog
+# El copyright de upstream menciona la GPL sin referir a /usr/share/common-licenses; aflora al renombrar doc/autofirma
+copyright-not-using-common-license-for-gpl

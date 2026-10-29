@@ -1,53 +1,54 @@
-#!/bin/sh
-# generamos certificado CA y SSL
-java -jar /usr/lib/Autofirma/autofirmaConfigurador.jar
-# damos permiso al script de instalacion del certificado para firefox y lo ejecutamos
+#!/bin/bash
+aviso() { echo "autofirma $0: AVISO: $*" >&2; }
 
+# generamos certificado CA y SSL
+java -jar /usr/lib/Autofirma/autofirmaConfigurador.jar || aviso "el configurador ha fallado"
+# el paso por usuario lee el certificado como usuario
+chmod 644 /usr/lib/Autofirma/Autofirma_ROOT.cer || aviso "no se pudo dar permiso de lectura a Autofirma_ROOT.cer"
+
+# damos permiso al script de instalacion del certificado para firefox y lo ejecutamos
 echo "Generacion de certificados"
 
 if [ -f "/usr/lib/Autofirma/script.sh" ]; then
-chmod +x /usr/lib/Autofirma/script.sh
-/usr/lib/Autofirma/script.sh
-
+	chmod +x /usr/lib/Autofirma/script.sh || aviso "no se pudo dar permiso a script.sh"
+	/usr/lib/Autofirma/script.sh || aviso "script.sh ha fallado"
 fi
 
 echo "Instalacion del certificado CA en el almacenamiento de Firefox y Chrome"
 
-#Creacion de certificado .pem y .crt para su importacion en el almacenamiento del sistema
-openssl x509 -inform der -in /usr/lib/Autofirma/Autofirma_ROOT.cer -out /usr/lib/Autofirma/Autofirma_ROOT.pem
+# Creacion de certificado .pem y .crt para su importacion en el almacenamiento del sistema
+openssl x509 -inform der -in /usr/lib/Autofirma/Autofirma_ROOT.cer -out /usr/lib/Autofirma/Autofirma_ROOT.pem || aviso "openssl no pudo convertir Autofirma_ROOT.cer"
 
-mv /usr/lib/Autofirma/Autofirma_ROOT.pem /usr/lib/Autofirma/Autofirma_ROOT.crt
+mv -f /usr/lib/Autofirma/Autofirma_ROOT.pem /usr/lib/Autofirma/Autofirma_ROOT.crt || aviso "no se pudo renombrar Autofirma_ROOT.pem"
 
-if [ -d "/usr/share/ca-certificates/Autofirma" ]; then
-rm -R /usr/share/ca-certificates/Autofirma/
-fi
+rm -rf /usr/share/ca-certificates/Autofirma/ || aviso "no se pudo borrar /usr/share/ca-certificates/Autofirma/"
 
-mkdir /usr/share/ca-certificates/Autofirma/
-cp /usr/lib/Autofirma/Autofirma_ROOT.crt /usr/share/ca-certificates/Autofirma/Autofirma_ROOT.crt
-cp /usr/lib/Autofirma/Autofirma_ROOT.crt /usr/local/share/ca-certificates/Autofirma_ROOT.crt
-update-ca-certificates
+mkdir -p /usr/share/ca-certificates/Autofirma/ /usr/local/share/ca-certificates/ || aviso "no se pudieron crear los directorios de certificados"
+cp /usr/lib/Autofirma/Autofirma_ROOT.crt /usr/share/ca-certificates/Autofirma/Autofirma_ROOT.crt || aviso "no se pudo copiar el certificado a /usr/share/ca-certificates"
+cp /usr/lib/Autofirma/Autofirma_ROOT.crt /usr/local/share/ca-certificates/Autofirma_ROOT.crt || aviso "no se pudo copiar el certificado a /usr/local/share/ca-certificates"
+update-ca-certificates || aviso "update-ca-certificates ha fallado"
 echo "Instalacion del certificado CA en el almacenamiento del sistema"
 
 # Enlazamos el fichero de asociacion del protocolo "afirma" en Firefox
 # para que aplique a otros navegadores
 if [ -d /etc/icecat ] ; then
-   if [ ! -d /etc/icecat/pref ] ; then
-      mkdir /etc/icecat/pref
-   fi
-   ln -s /etc/firefox/pref/AutoFirma.js /etc/icecat/pref/AutoFirma.js
+	mkdir -p /etc/icecat/pref || aviso "no se pudo crear /etc/icecat/pref"
+	ln -sfn /etc/firefox/pref/AutoFirma.js /etc/icecat/pref/AutoFirma.js || aviso "no se pudo enlazar /etc/icecat/pref/AutoFirma.js"
 fi
 if [ -d /etc/firefox-esr ] ; then
-   if [ ! -d /etc/firefox-esr/pref ] ; then
-      mkdir /etc/firefox-esr/pref
-   fi
-   ln -s /etc/firefox/pref/AutoFirma.js /etc/firefox-esr/pref/AutoFirma.js
+	mkdir -p /etc/firefox-esr/pref || aviso "no se pudo crear /etc/firefox-esr/pref"
+	ln -sfn /etc/firefox/pref/AutoFirma.js /etc/firefox-esr/pref/AutoFirma.js || aviso "no se pudo enlazar /etc/firefox-esr/pref/AutoFirma.js"
 fi
 
-# Definimos la aplicacion autofirma como la de por defecto para abrir los x/handler (no es necesario porque se define en el fichero de control)
-#xdg-mime default /usr/share/applications/afirma.desktop x-scheme-handler/afirma
+# Extension CSP de Firefox: fusiona su clave en policies.json sin tocar el resto
+# /etc/firefox/policies lo leen Firefox ESR y el Firefox de Mozilla; el de firefox-esr solo si ya existe
+mkdir -p /etc/firefox/policies || aviso "no se pudo crear /etc/firefox/policies"
+for pj in /etc/firefox/policies/policies.json /etc/firefox-esr/policies/policies.json; do
+	if [ "$pj" = /etc/firefox/policies/policies.json ] || [ -f "$pj" ]; then
+		/usr/lib/Autofirma/fisat-politicas.py add "$pj" autofirma-csp-fix@local /usr/share/Autofirma/autofirma-csp-fix.xpi || aviso "no se pudo registrar la extension CSP en $pj"
+	fi
+done
 
 # borramos los ficheros de instalacion
-rm /usr/lib/Autofirma/script.sh
-rm /usr/lib/Autofirma/Autofirma_ROOT.crt
+rm -f /usr/lib/Autofirma/script.sh /usr/lib/Autofirma/Autofirma_ROOT.crt || aviso "no se pudieron borrar los ficheros de instalacion"
 exit 0
-
