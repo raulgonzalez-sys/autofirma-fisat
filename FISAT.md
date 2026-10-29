@@ -126,6 +126,7 @@ Clases que ejecuta el job `pruebas` (`-Dtest` del workflow). JUnit 4, nombre
 | `TestConfiguratorFirefoxLinux` | `afirma-ui-simple-configurator` | I7 |
 | `TestConfiguratorFirefoxCommon` | `afirma-ui-simple-configurator` | D1 |
 | `TestCertUtil` | `afirma-ui-simple-configurator` | línea base (ya existía) |
+| `NativeFileDialogsTest` | `afirma-ui-core-jse` | f22 diálogos nativos |
 
 ## Notas operativas
 
