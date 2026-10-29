@@ -1,6 +1,16 @@
 #!/bin/bash
 aviso() { echo "autofirma $0: AVISO: $*" >&2; }
 
+# Quita la clave de la extension CSP de policies.json solo al desinstalar (nunca al actualizar).
+# Tiene que ser aqui: dpkg borra los ficheros del paquete antes de postrm y el ayudante ya no existiria
+case "$1" in
+	remove|deconfigure)
+		for pj in /etc/firefox/policies/policies.json /etc/firefox-esr/policies/policies.json; do
+			/usr/lib/Autofirma/fisat-politicas.py remove "$pj" autofirma-csp-fix@local --delete-if-empty || aviso "no se pudo quitar la extension CSP de $pj"
+		done
+		;;
+esac
+
 # Eliminamos los enlaces creados en el script de postinstalacion y los heredados del paquete oficial
 rm -f /etc/icecat/pref/AutoFirma.js || aviso "no se pudo borrar /etc/icecat/pref/AutoFirma.js"
 rm -f /etc/firefox-esr/pref/AutoFirma.js || aviso "no se pudo borrar /etc/firefox-esr/pref/AutoFirma.js"

@@ -156,17 +156,19 @@ chk_xpi() {
 	[ "$obtenido" = "$esperado" ] || { echo "sha256 del xpi: $obtenido (esperado $esperado)"; return 1; }
 }
 
-# fisat-politicas.py ejecutable; postinst lo llama con add y postrm con remove solo en remove|purge
+# fisat-politicas.py ejecutable; postinst lo llama con add; prerm con remove solo en remove|deconfigure
+# (postrm no puede: dpkg ya ha borrado el ayudante) y postrm no lo llama
 chk_politicas() {
 	local perm fuera dentro
 	perm=$(listado | awk '$3 == "./usr/lib/Autofirma/fisat-politicas.py" {print $1}')
 	[ "$perm" = "-rwxr-xr-x" ] || { echo "fisat-politicas.py ausente o con permisos '$perm' (esperado -rwxr-xr-x)"; return 1; }
 	grep -Eq 'fisat-politicas\.py[[:space:]]+add[[:space:]]' "$X/DEBIAN/postinst" || { echo "postinst no llama a fisat-politicas.py add"; return 1; }
-	# postrm: llamadas a remove fuera y dentro de la rama remove|purge del case
-	fuera=$(awk '/^[[:space:]]*remove\|purge\)/ {d=1} d==0 && /fisat-politicas\.py[[:space:]]+remove/ {print} /;;/ {d=0}' "$X/DEBIAN/postrm")
-	dentro=$(awk '/^[[:space:]]*remove\|purge\)/ {d=1} d==1 && /fisat-politicas\.py[[:space:]]+remove/ {print} /;;/ {d=0}' "$X/DEBIAN/postrm")
-	[ -n "$dentro" ] || { echo "postrm no llama a fisat-politicas.py remove dentro de remove|purge"; return 1; }
-	[ -z "$fuera" ] || { echo "postrm llama a remove fuera de remove|purge: $fuera"; return 1; }
+	! grep -q 'fisat-politicas\.py' "$X/DEBIAN/postrm" || { echo "postrm llama a fisat-politicas.py: dpkg ya lo ha borrado en ese momento, debe ir en prerm"; return 1; }
+	# prerm: llamadas a remove fuera y dentro de la rama remove|deconfigure del case
+	fuera=$(awk '/^[[:space:]]*remove\|deconfigure\)/ {d=1} d==0 && /fisat-politicas\.py[[:space:]]+remove/ {print} /;;/ {d=0}' "$X/DEBIAN/prerm")
+	dentro=$(awk '/^[[:space:]]*remove\|deconfigure\)/ {d=1} d==1 && /fisat-politicas\.py[[:space:]]+remove/ {print} /;;/ {d=0}' "$X/DEBIAN/prerm")
+	[ -n "$dentro" ] || { echo "prerm no llama a fisat-politicas.py remove dentro de remove|deconfigure"; return 1; }
+	[ -z "$fuera" ] || { echo "prerm llama a remove fuera de remove|deconfigure: $fuera"; return 1; }
 }
 
 chk_maintainer_shellcheck() {
