@@ -93,6 +93,69 @@ chk_lintian() {
 	}
 }
 
+# Lista de rutas del paquete (formato ./ruta)
+rutas() { dpkg-deb --fsys-tarfile "$DEB" | tar -tf -; }
+
+chk_icono() {
+	local l icono_desktop icono_meta falta=""
+	l=$(rutas)
+	grep -Fxq "./usr/lib/Autofirma/Autofirma.png" <<<"$l" || falta="$falta ./usr/lib/Autofirma/Autofirma.png"
+	icono_desktop=$(sed -n 's/^Icon=//p' "$X/usr/share/applications/afirma.desktop" 2>/dev/null | head -n 1)
+	icono_meta=$(sed -n 's|.*<icon[^>]*>\(.*\)</icon>.*|\1|p' "$X/usr/share/metainfo/es.gob.afirma.metainfo.xml" 2>/dev/null | head -n 1)
+	[ -n "$icono_desktop" ] || falta="$falta Icon=(desktop)"
+	[ -n "$icono_meta" ] || falta="$falta icon(metainfo)"
+	[ -z "$icono_desktop" ] || grep -Fxq ".$icono_desktop" <<<"$l" || falta="$falta $icono_desktop"
+	[ -z "$icono_meta" ] || grep -Fxq ".$icono_meta" <<<"$l" || falta="$falta $icono_meta"
+	[ -z "$falta" ] || { echo "faltan en el paquete:$falta"; return 1; }
+}
+
+chk_sin_mayusculas() {
+	local malas
+	malas=$(rutas | grep -F '/AutoFirma/' || true)
+	[ -z "$malas" ] || { echo "rutas con /AutoFirma/: $(echo "$malas" | tr '\n' ' ')"; return 1; }
+}
+
+chk_sin_pkill() {
+	local hallazgos
+	hallazgos=$(grep -nE 'pkill|killall' "$X"/DEBIAN/* || true)
+	[ -z "$hallazgos" ] || { echo "$hallazgos"; return 1; }
+}
+
+# Destinos de ln en postinst frente a los AutoFirma.js que borra prerm
+chk_enlaces_prefs() {
+	local enlazados borrados linea l
+	enlazados=$(
+		while IFS= read -r linea; do
+			linea=${linea%%||*}
+			read -ra w <<<"$linea"
+			echo "${w[${#w[@]}-1]}"
+		done < <(grep -E '^[[:space:]]*ln[[:space:]]' "$X/DEBIAN/postinst" || true) | sort -u
+	)
+	borrados=$(grep -E '^[[:space:]]*rm[[:space:]]' "$X/DEBIAN/prerm" | grep -oE '/etc/[^ ;"]+/AutoFirma\.js' | sort -u || true)
+	[ -n "$enlazados" ] || { echo "postinst no enlaza nada con ln"; return 1; }
+	[ "$enlazados" = "$borrados" ] || {
+		echo "postinst enlaza: $(echo "$enlazados" | tr '\n' ' ')| prerm borra: $(echo "$borrados" | tr '\n' ' ')"
+		return 1
+	}
+	l=$(rutas)
+	grep -Fxq "./etc/firefox/pref/AutoFirma.js" <<<"$l" || { echo "falta ./etc/firefox/pref/AutoFirma.js en el paquete"; return 1; }
+}
+
+# Solo los errores de desktop-file-validate; los avisos no cuentan
+chk_desktop() {
+	local salida errores
+	salida=$(desktop-file-validate "$X/usr/share/applications/afirma.desktop" 2>&1 || true)
+	errores=$(grep ': error:' <<<"$salida" || true)
+	[ -z "$errores" ] || { echo "$errores"; return 1; }
+}
+
+chk_maintainer_shellcheck() {
+	local s salida
+	for s in preinst postinst prerm postrm; do
+		salida=$(shellcheck -s bash -x "$X/DEBIAN/$s" 2>&1) || { echo "$s: $salida" | head -n 20; return 1; }
+	done
+}
+
 # Ejecuta las comprobaciones (todas o solo la pedida) y resume
 if [ -n "$SOLO" ]; then
 	declare -F "chk_$SOLO" >/dev/null || { echo "No existe la comprobación '$SOLO'" >&2; exit 2; }

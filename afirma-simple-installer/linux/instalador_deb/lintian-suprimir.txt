@@ -5,5 +5,5 @@ description-starts-with-package-name
 file-in-etc-not-marked-as-conffile
 # Paquete sin changelog en usr/share/doc
 no-changelog
-# Se retira cuando la Tarea 12 renombre doc/AutoFirma a doc/autofirma
-no-copyright-file
+# El copyright de upstream menciona la GPL sin referir a /usr/share/common-licenses; aflora al renombrar doc/autofirma
+copyright-not-using-common-license-for-gpl

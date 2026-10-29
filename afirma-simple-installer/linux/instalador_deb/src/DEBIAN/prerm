@@ -1,53 +1,27 @@
-#!/bin/sh
-# Cerramos el navegador Firefox los certificados
-if pgrep firefox; then
-pkill firefox;
-fi
+#!/bin/bash
+aviso() { echo "autofirma $0: AVISO: $*" >&2; }
 
-# Eliminamos los enlaces creados en el script de postinstalacion
-if [ -f /etc/icecat/pref/Autofirma.js ] ; then
-   rm /etc/icecat/pref/Autofirma.js
-fi
-if [ -f /etc/firefox-esr/pref/Autofirma.js ] ; then
-   rm /etc/firefox-esr/pref/Autofirma.js
-fi
+# Eliminamos los enlaces creados en el script de postinstalacion y los heredados del paquete oficial
+rm -f /etc/icecat/pref/AutoFirma.js || aviso "no se pudo borrar /etc/icecat/pref/AutoFirma.js"
+rm -f /etc/firefox-esr/pref/AutoFirma.js || aviso "no se pudo borrar /etc/firefox-esr/pref/AutoFirma.js"
+rm -f /etc/icecat/pref/Autofirma.js /etc/firefox-esr/pref/Autofirma.js || aviso "no se pudieron borrar los enlaces Autofirma.js heredados"
 
 # damos permisos de desinstalacion de los certificados del almacen de firefox
 if [ -f "/usr/lib/Autofirma/uninstall.sh" ]; then
-chmod +x /usr/lib/Autofirma/uninstall.sh
-/usr/lib/Autofirma/uninstall.sh
-echo "Se ha borrado el certificado CA de los almacenes de Firefox"
+	chmod +x /usr/lib/Autofirma/uninstall.sh || aviso "no se pudo dar permiso a uninstall.sh"
+	/usr/lib/Autofirma/uninstall.sh || aviso "uninstall.sh ha fallado"
+	echo "Se ha borrado el certificado CA de los almacenes de Firefox"
 fi
 
 # borramos los certificados instalados en el almacenamiento del sistema
-if [ -d "/usr/share/ca-certificates/Autofirma" ];
-then
-rm -R /usr/share/ca-certificates/Autofirma
-fi
+rm -rf /usr/share/ca-certificates/Autofirma || aviso "no se pudo borrar /usr/share/ca-certificates/Autofirma"
+rm -f /usr/local/share/ca-certificates/Autofirma_ROOT.crt || aviso "no se pudo borrar Autofirma_ROOT.crt"
+rm -f /usr/lib/Autofirma/uninstall.sh || aviso "no se pudo borrar uninstall.sh"
+rm -f /usr/lib/Autofirma/autofirma.pfx || aviso "no se pudo borrar autofirma.pfx"
+rm -f /usr/lib/Autofirma/Autofirma_ROOT.cer || aviso "no se pudo borrar Autofirma_ROOT.cer"
 
-if [ -f "/usr/local/share/ca-certificates/Autofirma_ROOT.crt" ];
-then
-rm /usr/local/share/ca-certificates/Autofirma_ROOT.crt
-fi
-
-if [ -f "/usr/lib/Autofirma/uninstall.sh" ];
-then
-rm /usr/lib/Autofirma/uninstall.sh
-fi
-
-if [ -f "/usr/lib/Autofirma/autofirma.pfx" ];
-then
-rm /usr/lib/Autofirma/autofirma.pfx
-fi
-
-if [ -f "/usr/lib/Autofirma/Autofirma_ROOT.cer" ];
-then
-rm /usr/lib/Autofirma/Autofirma_ROOT.cer
-fi
-
-update-ca-certificates
+update-ca-certificates || aviso "update-ca-certificates ha fallado"
 
 echo "Se ha borrado el certificado CA en el almacenamiento del sistema"
 
 exit 0
-
