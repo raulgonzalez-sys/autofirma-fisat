@@ -9,7 +9,9 @@
 
 package es.gob.afirma.standalone.protocol;
 
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.UnknownHostException;
 import java.util.Collections;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -65,7 +67,7 @@ public class AfirmaWebSocketServer extends WebSocketServer {
 	 * para usar el servicio.
 	 */
 	public AfirmaWebSocketServer(final int port, final String sessionId) {
-		super(new InetSocketAddress(port));
+		super(getBindAddress(port));
 		setReuseAddr(true);
 
 		this.sessionId = sessionId;
@@ -81,6 +83,21 @@ public class AfirmaWebSocketServer extends WebSocketServer {
 				}
 			}
 		});
+	}
+
+	/**
+	 * Obtiene la direcci&oacute;n de escucha del servidor: solo la interfaz de loopback IPv4
+	 * (127.0.0.1), para que ning&uacute;n otro equipo de la red pueda conectar.
+	 * @param port Puerto de escucha.
+	 * @return Direcci&oacute;n 127.0.0.1 con el puerto indicado.
+	 */
+	static InetSocketAddress getBindAddress(final int port) {
+		try {
+			// Se fija la IPv4 porque getLoopbackAddress() puede devolver ::1
+			return new InetSocketAddress(InetAddress.getByAddress(new byte[] {127, 0, 0, 1}), port);
+		} catch (final UnknownHostException e) {
+			throw new IllegalStateException("No se pudo construir la direccion de loopback", e); //$NON-NLS-1$
+		}
 	}
 
 	@Override
