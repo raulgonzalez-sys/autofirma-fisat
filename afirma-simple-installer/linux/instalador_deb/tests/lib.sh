@@ -27,7 +27,7 @@ chk_rc() {
 		PASA=$((PASA + 1))
 	else
 		echo "FALLO $nombre: rc esperado $esperado, obtenido $rc"
-		echo "$salida" | tail -n 5 | sed 's/^/    /'
+		echo "$salida" | tail -n 25 | sed 's/^/    /'
 		FALLA=$((FALLA + 1))
 	fi
 }
