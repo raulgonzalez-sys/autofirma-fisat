@@ -30,6 +30,12 @@ chk_control_depends() {
 	case $d in *headless*) echo "Depends contiene headless"; return 1 ;; esac
 }
 
+chk_control_recommends() {
+	local r esperado='kdialog | zenity'
+	r=$(dpkg-deb -f "$DEB" Recommends)
+	[ "$r" = "$esperado" ] || { echo "Recommends='$r'"; return 1; }
+}
+
 chk_control_version() {
 	local v nombre esperado
 	v=$(dpkg-deb -f "$DEB" Version)
