@@ -9,6 +9,7 @@ LOG_MAX=262144
 SALIDA=normal
 NSS_MOTIVO=
 MODO_CHECK=0
+MODO_QUITAR=0
 PEOR=0
 CER=${AUTOFIRMA_FISAT_CER:-/usr/lib/Autofirma/Autofirma_ROOT.cer}
 BIN=${AUTOFIRMA_FISAT_BIN:-/usr/bin/autofirma}
@@ -60,13 +61,14 @@ sys.exit(10)
 
 uso() {
 	cat <<'EOF'
-Uso: fisat-usuario.sh [--quiet|--verbose] [--check] [--help]
+Uso: fisat-usuario.sh [--quiet|--verbose] [--check|--remove] [--help]
 Instala el certificado raíz de AutoFirma en los perfiles Mozilla del usuario
 y en el almacén NSS de Chrome ${XDG_DATA_HOME:-~/.local/share}/pki/nssdb si existe,
 enlaza ~/.pki/nssdb al perfil activo y registra afirma:// en Firefox.
   --quiet    sin salida por pantalla
   --verbose  registra también lo que ya estaba bien
   --check    solo comprueba, sin escribir: sale 0 (bien), 1 (pendiente) o 2 (error)
+  --remove   retira SocketAutoFirma y Autofirma ROOT de esos almacenes; no toca nada más
 Entorno: AUTOFIRMA_FISAT_CER, AUTOFIRMA_FISAT_BIN, XDG_DATA_HOME (solo si es absoluto)
 EOF
 }
@@ -189,7 +191,18 @@ nss_sync() {
 	return 10
 }
 
-# nss_tratar <db>: certificado en <db>, una sola vez por destino real; en --check solo informa (0 bien, 1 pendiente)
+# nss_quitar <db>: 0 sin almacén, 2 con contraseña maestra (NSS_MOTIVO); si no, lo que devuelva nss_borrar
+nss_quitar() {
+	NSS_MOTIVO=
+	[ -f "$1/cert9.db" ] || return 0
+	if nss_contrasena "$1"; then
+		NSS_MOTIVO="contraseña maestra"
+		return 2
+	fi
+	nss_borrar "$1"
+}
+
+# nss_tratar <db>: certificado en <db>, una sola vez por destino real; en --check solo informa (0 bien, 1 pendiente); en --remove lo retira
 nss_tratar() {
 	local db=$1 real r
 	real=$(realpath -e -- "$db" 2>/dev/null) || return 0
@@ -208,11 +221,21 @@ nss_tratar() {
 		esac
 		return 0
 	fi
-	nss_sync "$db" "$CER"
+	if [ "$MODO_QUITAR" = 1 ]; then
+		nss_quitar "$db"
+	else
+		nss_sync "$db" "$CER"
+	fi
 	r=$?
 	case $r in
 		0) detalle "sin cambios: $db" ;;
-		10) log info "certificado instalado en $db" ;;
+		10)
+			if [ "$MODO_QUITAR" = 1 ]; then
+				log info "certificado retirado de $db"
+			else
+				log info "certificado instalado en $db"
+			fi
+			;;
 		*)
 			if [ "$NSS_MOTIVO" = "contraseña maestra" ]; then
 				log aviso "omitido $db: contraseña maestra"
@@ -506,6 +529,22 @@ sincronizar() {
 	return "$PEOR"
 }
 
+# retirar: --remove en los almacenes de la sincronización; nunca toca enlaces, user.js ni handlers.json
+retirar() {
+	local db pki=$HOME/.pki/nssdb xdg
+	while IFS= read -r db; do
+		nss_tratar "$db"
+	done < <(perfiles_nss)
+	if [ -L "$pki" ]; then
+		es_perfil_ff "$pki" && nss_tratar "$pki"
+	elif [ -d "$pki" ] && [ -f "$pki/cert9.db" ]; then
+		nss_tratar "$pki"
+	fi
+	xdg=$(nss_xdg)
+	[ -f "$xdg/cert9.db" ] && nss_tratar "$xdg"
+	return 0
+}
+
 # candado: espera hasta 15 s al candado del usuario; lo mantiene hasta salir
 candado() {
 	local f="${XDG_RUNTIME_DIR:-/tmp}/autofirma-fisat-$UID.lock"
@@ -536,12 +575,13 @@ comprobar() {
 }
 
 main() {
-	local check=0 quiet=0 verbose=0 a
+	local check=0 quitar=0 quiet=0 verbose=0 a
 	for a in "$@"; do
 		case $a in
 			--quiet) quiet=1 ;;
 			--verbose) verbose=1 ;;
 			--check) check=1 ;;
+			--remove) quitar=1 ;;
 			--help)
 				uso
 				return 0
@@ -552,7 +592,7 @@ main() {
 				;;
 		esac
 	done
-	if [ "$quiet" = 1 ] && [ "$verbose" = 1 ]; then
+	if { [ "$quiet" = 1 ] && [ "$verbose" = 1 ]; } || { [ "$check" = 1 ] && [ "$quitar" = 1 ]; }; then
 		uso >&2
 		return 64
 	fi
@@ -562,6 +602,17 @@ main() {
 	if [ "$check" = 1 ]; then
 		comprobar
 		return $?
+	fi
+
+	if [ "$quitar" = 1 ]; then
+		candado || return 0
+		if ! command -v certutil >/dev/null; then
+			log error "falta certutil (libnss3-tools)"
+			return 0
+		fi
+		MODO_QUITAR=1
+		retirar
+		return 0
 	fi
 
 	candado || return 0

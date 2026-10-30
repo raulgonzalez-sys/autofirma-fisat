@@ -726,4 +726,103 @@ chk X10_rc 2 "$(rc fn nss_borrar "$T/x10")"
 chk X10_queda_una 1 "$(entradas "$T/x10" SocketAutoFirma)"
 chk X10_vacia_rc 0 "$(rc fn nss_borrar "$T/c8")"
 
+# --- Retirada (--remove) ---
+
+# R0_opciones
+chk R0_remove_y_check 64 "$(rc "$S" --remove --check)"
+chk R0_help 0 "$(rc "$S" --help)"
+chk R0_help_remove 1 "$("$S" --help | grep -qF -- '--remove' && echo 1 || echo 0)"
+
+# llenar_r <db>: personales con clave, apodo con prefijo, dos SocketAutoFirma y el apodo antiguo
+llenar_r() {
+	mk_personal "$1"
+	mk_personal "$1" "SocketAutoFirma copia"
+	certutil -A -d "sql:$1" -n SocketAutoFirma2 -t "C,," -i "$T/X.cer"
+	certutil -A -d "sql:$1" -n SocketAutoFirma -t "C,," -i "$T/A.cer"
+	certutil -A -d "sql:$1" -n SocketAutoFirma -t "C,," -i "$T/B.cer"
+	certutil -A -d "sql:$1" -n "Autofirma ROOT" -t "CT,C," -i "$T/L.cer"
+}
+
+# R1_invariante_remove: en perfil Firefox, ~/.pki/nssdb real y XDG solo se retiran SocketAutoFirma y el apodo antiguo
+nuevo_caso
+R=$HOME/.mozilla/firefox
+mk_ff "$R" uno
+declare -A R1_DB=([perfil]="$R/uno" [pki]="$HOME/.pki/nssdb" [xdg]="$XD")
+for e in perfil pki xdg; do
+	db=${R1_DB[$e]}
+	mk_nss "$db"
+	llenar_r "$db"
+	chk "R1_${e}_antes_socket" 2 "$(entradas "$db" SocketAutoFirma)"
+	chk "R1_${e}_antes_antiguo" 1 "$(entradas "$db" "Autofirma ROOT")"
+	chk "R1_${e}_antes_claves" 2 "$(($(clave "$db" "Usuario Prueba") + $(clave "$db" "SocketAutoFirma copia")))"
+	certutil -K -d "sql:$db" -f /dev/null >"$T/r1.$e.antes.K" 2>/dev/null
+done
+chk R1_rc 0 "$(rc "$S" --remove --quiet)"
+for e in perfil pki xdg; do
+	db=${R1_DB[$e]}
+	certutil -K -d "sql:$db" -f /dev/null >"$T/r1.$e.despues.K" 2>/dev/null
+	chk "R1_${e}_sin_socket" 0 "$(entradas "$db" SocketAutoFirma)"
+	chk "R1_${e}_sin_antiguo" 0 "$(entradas "$db" "Autofirma ROOT")"
+	chk "R1_${e}_personal" 1 "$(entradas "$db" "Usuario Prueba")"
+	chk "R1_${e}_personal_clave" 1 "$(clave "$db" "Usuario Prueba")"
+	chk "R1_${e}_copia" 1 "$(entradas "$db" "SocketAutoFirma copia")"
+	chk "R1_${e}_copia_clave" 1 "$(clave "$db" "SocketAutoFirma copia")"
+	chk "R1_${e}_prefijo" 1 "$(entradas "$db" SocketAutoFirma2)"
+	chk "R1_${e}_claves_iguales" "$(cat "$T/r1.$e.antes.K")" "$(cat "$T/r1.$e.despues.K")"
+done
+chk R1_sigue_dir_real 1 "$(es_dir_real "$HOME/.pki/nssdb")"
+chk R1_log_xdg 1 "$(grep -cF "[info] certificado retirado de $XD" "$XDG_STATE_HOME/autofirma-fisat/usuario.log")"
+chk R1_invariante_remove_check 1 "$(rc "$S" --check)"
+
+# R2_no_crea_nada: home vacío
+nuevo_caso
+chk R2_rc 0 "$(rc "$S" --remove --quiet)"
+chk R2_no_crea_nada 0 "$(find "$HOME" -mindepth 1 | wc -l)"
+
+# R3_sin_cer: --remove no necesita el certificado
+nuevo_caso
+mk_nss "$XD"
+certutil -A -d "sql:$XD" -n SocketAutoFirma -t "C,," -i "$T/A.cer"
+export AUTOFIRMA_FISAT_CER=$T/no-existe
+chk R3_rc 0 "$(rc "$S" --remove --quiet)"
+chk R3_sin_cer 0 "$(entradas "$XD" SocketAutoFirma)"
+
+# R4_contrasena: con contraseña maestra no se toca y se avisa
+nuevo_caso
+mk_nss "$XD"
+certutil -A -d "sql:$XD" -n SocketAutoFirma -t "C,," -i "$T/A.cer"
+printf '\n' >"$T/vacia.pw"
+certutil -W -d "sql:$XD" -f "$T/vacia.pw" -@ "$T/c7.pw" </dev/null >/dev/null 2>&1
+chk R4_tiene_contrasena 0 "$(rc fn nss_contrasena "$XD")"
+chk R4_rc 0 "$(rc "$S" --remove --quiet)"
+chk R4_sigue 1 "$(entradas "$XD" SocketAutoFirma)"
+chk R4_contrasena 1 "$(grep -cF "[aviso] omitido $XD: contraseña maestra" "$XDG_STATE_HOME/autofirma-fisat/usuario.log")"
+
+# R5_no_toca_enlaces_ni_prefs: retira la CA pero deja el enlace, user.js y handlers.json
+nuevo_caso
+R=$HOME/.mozilla/firefox
+mk_ff "$R" uno
+mk_nss "$R/uno"
+"$S" --quiet
+l1=$(readlink "$HOME/.pki/nssdb")
+u1=$(sha "$R/uno/user.js")
+h1=$(sha "$R/uno/handlers.json")
+chk R5_rc 0 "$(rc "$S" --remove --quiet)"
+chk R5_retirada 0 "$(entradas "$R/uno" SocketAutoFirma)"
+chk R5_enlace "$l1" "$(readlink "$HOME/.pki/nssdb")"
+chk R5_userjs "$u1" "$(sha "$R/uno/user.js")"
+chk R5_handlers "$h1" "$(sha "$R/uno/handlers.json")"
+
+# R6_enlace_ajeno: ~/.pki/nssdb hacia un NSS fuera de Firefox no se toca
+nuevo_caso
+mk_ff "$HOME/.mozilla/firefox" uno
+mk_nss "$HOME/.mozilla/firefox/uno"
+mk_nss "$T/r6"
+certutil -A -d "sql:$T/r6" -n SocketAutoFirma -t "C,," -i "$T/A.cer"
+mkdir -p "$HOME/.pki"
+ln -s "$T/r6" "$HOME/.pki/nssdb"
+chk R6_rc 0 "$(rc "$S" --remove --quiet)"
+chk R6_enlace_ajeno 1 "$(entradas "$T/r6" SocketAutoFirma)"
+chk R6_enlace_igual "$T/r6" "$(readlink "$HOME/.pki/nssdb")"
+
 fin
