@@ -140,13 +140,13 @@ Clases que ejecuta el job `pruebas` (`-Dtest` del workflow). JUnit 4, nombre
 
 ### Raíz de Firefox en Linux
 
-- Firefox elige la raíz tradicional (`~/.mozilla/firefox`) si ya existe y usa la XDG (`~/.config/mozilla/firefox`) solo en su ausencia: `nsXREDirProvider::GetLegacyOrXDGHomePath` llama a `LegacyHomeExists`, que solo mira las rutas tradicionales, y cae a XDG si no están. Fuente: https://github.com/mozilla-firefox/firefox/blob/main/toolkit/xre/nsXREDirProvider.cpp (leído el 2026-10-30).
-- Regla del fork (`NssLinuxDatabases.firefoxRoot`): `~/.mozilla/firefox` si contiene `profiles.ini`; si no, `~/.config/mozilla/firefox`; Snap (`~/snap/firefox/common/.mozilla/firefox`) al final. Difiere de Firefox en un caso marginal: Firefox decide por la existencia del directorio tradicional y el fork por la del `profiles.ini`, para no quedarse con una raíz vacía.
+- Firefox elige la raíz tradicional (`~/.mozilla/firefox`) si el directorio existe, aunque no tenga `profiles.ini`, y usa la XDG (`~/.config/mozilla/firefox`) solo en su ausencia: `nsXREDirProvider::GetLegacyOrXDGHomePath` llama a `LegacyHomeExists`, que solo mira las rutas tradicionales. Fuente: https://github.com/mozilla-firefox/firefox/blob/eed57099f5fd90b156725aeb1a25472dce631370/toolkit/xre/nsXREDirProvider.cpp (leído el 2026-10-30). `MOZ_LEGACY_HOME=1` (entorno o compilación) fuerza la tradicional aunque no exista; es una variable del proceso de Firefox que el fork no ve, y no se contempla.
+- Regla del fork (`NssLinuxDatabases.firefoxRoots`/`firefoxRoot`), la misma: raíz tradicional con `profiles.ini`; la XDG con `profiles.ini` solo si el directorio tradicional no existe; Snap (`~/snap/firefox/common/.mozilla/firefox`) al final. Con el directorio tradicional presente y sin `profiles.ini`, no se devuelve la XDG: no hay perfil de Firefox que tocar.
 - `findDatabases` devuelve el perfil activo de Firefox y la base de Chrome, solo con `cert9.db` y sin repetidas por ruta real, Firefox primero. Usuario sin base de Chrome: solo Firefox.
 
 ### Chrome y AutoFirma desde la web
 
-- Almacén de Chrome: `~/.pki/nssdb` si existe; si no, `${XDG_DATA_HOME:-~/.local/share}/pki/nssdb`. El paso por usuario instala la CA en los dos.
+- Almacén de Chrome: `~/.pki/nssdb` si existe; si no, `~/.local/share/pki/nssdb` (ruta literal). El paso por usuario instala la CA en los dos.
 - Chrome solo lee la CA al arrancar. Tras instalar o actualizar el paquete (la CA se regenera en cada actualización) hay que reiniciar Chrome o cerrar la sesión: probado, Chrome no acepta en caliente una CA añadida a su almacén abierto. `postinst` lo avisa.
 - Política `/etc/opt/chrome/policies/managed/autofirma-fisat.json` (`AutoLaunchProtocolsFromOrigins`, protocolo `afirma`, `allowed_origins: ["*"]`): Chrome lanza `afirma://` sin preguntar y cualquier origen puede hacerlo. Comprobar en `chrome://policy`. Chromium no está incluido.
 - Ciclo de vida de AutoFirma lanzado desde la web: vive mientras la pestaña mantiene abierto el websocket. Se cierra al cerrar la pestaña o Chrome (código 1001), al cortarse la conexión o suspender el equipo (1006), o a los 30 s si nunca llega a conectarse. No es un fallo.

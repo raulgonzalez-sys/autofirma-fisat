@@ -75,14 +75,25 @@ public class NssLinuxDatabasesTest {
 		assertEquals(root, NssLinuxDatabases.firefoxRoot(home));
 	}
 
-	/** Con las dos raices gana la tradicional, como en Firefox. @throws Exception En cualquier error. */
+	/** Con las dos raices solo cuenta la tradicional, como en Firefox. @throws Exception En cualquier error. */
 	@Test
 	public void ambas() throws Exception {
 		final File home = home();
 		final File antigua = crearRaizFirefox(home, ".mozilla/firefox", true); //$NON-NLS-1$
-		final File xdg = crearRaizFirefox(home, ".config/mozilla/firefox", true); //$NON-NLS-1$
+		crearRaizFirefox(home, ".config/mozilla/firefox", true); //$NON-NLS-1$
 		assertEquals(antigua, NssLinuxDatabases.firefoxRoot(home));
-		assertEquals(Arrays.asList(antigua, xdg), NssLinuxDatabases.firefoxRoots(home));
+		assertEquals(Collections.singletonList(antigua), NssLinuxDatabases.firefoxRoots(home));
+	}
+
+	/** Un directorio tradicional sin profiles.ini tapa a la XDG, como en Firefox. @throws Exception En cualquier error. */
+	@Test
+	public void tradicionalSinIniYXdg() throws Exception {
+		final File home = home();
+		Files.createDirectories(new File(home, ".mozilla/firefox").toPath()); //$NON-NLS-1$
+		crearRaizFirefox(home, ".config/mozilla/firefox", true); //$NON-NLS-1$
+		assertNull(NssLinuxDatabases.firefoxRoot(home));
+		assertTrue(NssLinuxDatabases.firefoxRoots(home).isEmpty());
+		assertTrue(NssLinuxDatabases.findDatabases(home).isEmpty());
 	}
 
 	/** Sin ninguna raiz no hay resultado. @throws Exception En cualquier error. */
@@ -101,6 +112,17 @@ public class NssLinuxDatabasesTest {
 		final File legacy = crearBase(home, ".pki/nssdb", true); //$NON-NLS-1$
 		crearBase(home, ".local/share/pki/nssdb", true); //$NON-NLS-1$
 		assertEquals(legacy, NssLinuxDatabases.chromeDatabase(home));
+	}
+
+	/** ~/.pki/nssdb existe sin cert9.db y la XDG esta poblada: se elige la heredada y findDatabases la descarta
+	 * sin caer a la XDG. @throws Exception En cualquier error. */
+	@Test
+	public void pkiSinCert9ConXdg() throws Exception {
+		final File home = home();
+		final File legacy = crearBase(home, ".pki/nssdb", false); //$NON-NLS-1$
+		crearBase(home, ".local/share/pki/nssdb", true); //$NON-NLS-1$
+		assertEquals(legacy, NssLinuxDatabases.chromeDatabase(home));
+		assertTrue(NssLinuxDatabases.findDatabases(home).isEmpty());
 	}
 
 	/** Sin base heredada se usa la XDG. @throws Exception En cualquier error. */
