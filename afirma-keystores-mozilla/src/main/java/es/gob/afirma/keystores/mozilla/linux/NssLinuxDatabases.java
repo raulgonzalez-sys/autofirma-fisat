@@ -33,43 +33,60 @@ public final class NssLinuxDatabases {
 		// No se permite la instanciacion
 	}
 
-	/** Obtiene las ra&iacute;ces de Firefox que contienen un {@code profiles.ini}, en orden de
-	 * preferencia y con la regla de Firefox: si existe el directorio tradicional
-	 * ({@code ~/.mozilla/firefox}) esa es la ra&iacute;z y nunca se usa la XDG
-	 * ({@code ~/.config/mozilla/firefox}), aunque el tradicional no tenga {@code profiles.ini};
-	 * la XDG solo cuenta si el directorio tradicional no existe. La de Snap
-	 * ({@code ~/snap/firefox/common/.mozilla/firefox}) va al final.
+	private static File legacyRoot(final File home) {
+		return new File(home, ".mozilla/firefox"); //$NON-NLS-1$
+	}
+
+	private static File xdgRoot(final File home) {
+		return new File(home, ".config/mozilla/firefox"); //$NON-NLS-1$
+	}
+
+	private static File snapRoot(final File home) {
+		return new File(home, "snap/firefox/common/.mozilla/firefox"); //$NON-NLS-1$
+	}
+
+	private static boolean hasProfilesIni(final File root) {
+		return new File(root, PROFILES_INI).isFile();
+	}
+
+	/** Obtiene todas las ra&iacute;ces de Firefox que contienen un {@code profiles.ini}, en
+	 * el orden tradicional ({@code ~/.mozilla/firefox}), XDG ({@code ~/.config/mozilla/firefox})
+	 * y Snap ({@code ~/snap/firefox/common/.mozilla/firefox}). No aplica la regla de Firefox
+	 * ({@link #firefoxRoot(File)}): sirve para recorrer los perfiles de todas las ra&iacute;ces,
+	 * por ejemplo al restaurar tras una migraci&oacute;n a la ra&iacute;z XDG.
 	 * @param home Directorio del usuario.
-	 * @return Ra&iacute;ces con {@code profiles.ini} (lista vac&iacute;a si no hay ninguna). */
+	 * @return Todas las ra&iacute;ces con {@code profiles.ini} (lista vac&iacute;a si no hay ninguna). */
 	public static List<File> firefoxRoots(final File home) {
 		final List<File> roots = new ArrayList<>();
 		if (home == null) {
 			return roots;
 		}
-		final File legacy = new File(home, ".mozilla/firefox"); //$NON-NLS-1$
-		if (new File(legacy, PROFILES_INI).isFile()) {
-			roots.add(legacy);
-		}
-		if (!legacy.isDirectory()) {
-			final File xdg = new File(home, ".config/mozilla/firefox"); //$NON-NLS-1$
-			if (new File(xdg, PROFILES_INI).isFile()) {
-				roots.add(xdg);
+		for (final File root : new File[] { legacyRoot(home), xdgRoot(home), snapRoot(home) }) {
+			if (hasProfilesIni(root)) {
+				roots.add(root);
 			}
-		}
-		final File snap = new File(home, "snap/firefox/common/.mozilla/firefox"); //$NON-NLS-1$
-		if (new File(snap, PROFILES_INI).isFile()) {
-			roots.add(snap);
 		}
 		return roots;
 	}
 
-	/** Obtiene la ra&iacute;z de Firefox que se debe usar: la primera de
-	 * {@link #firefoxRoots(File)}.
+	/** Obtiene la ra&iacute;z de Firefox que se debe usar para leer, con la regla del propio
+	 * Firefox: si existe el directorio tradicional esa es la ra&iacute;z y nunca se usa la XDG,
+	 * aunque el tradicional no tenga {@code profiles.ini}; la XDG solo cuenta si el directorio
+	 * tradicional no existe. La de Snap va al final.
 	 * @param home Directorio del usuario.
 	 * @return Directorio que contiene el {@code profiles.ini}, o {@code null} si no hay. */
 	public static File firefoxRoot(final File home) {
-		final List<File> roots = firefoxRoots(home);
-		return roots.isEmpty() ? null : roots.get(0);
+		if (home == null) {
+			return null;
+		}
+		final File legacy = legacyRoot(home);
+		if (hasProfilesIni(legacy)) {
+			return legacy;
+		}
+		if (!legacy.isDirectory() && hasProfilesIni(xdgRoot(home))) {
+			return xdgRoot(home);
+		}
+		return hasProfilesIni(snapRoot(home)) ? snapRoot(home) : null;
 	}
 
 	/** Obtiene el directorio de la base NSS de Chrome: {@code ~/.pki/nssdb} si existe y,

@@ -75,24 +75,24 @@ public class NssLinuxDatabasesTest {
 		assertEquals(root, NssLinuxDatabases.firefoxRoot(home));
 	}
 
-	/** Con las dos raices solo cuenta la tradicional, como en Firefox. @throws Exception En cualquier error. */
+	/** Con las dos raices se lee la tradicional, como en Firefox, y firefoxRoots devuelve las dos. @throws Exception En cualquier error. */
 	@Test
 	public void ambas() throws Exception {
 		final File home = home();
 		final File antigua = crearRaizFirefox(home, ".mozilla/firefox", true); //$NON-NLS-1$
-		crearRaizFirefox(home, ".config/mozilla/firefox", true); //$NON-NLS-1$
+		final File xdg = crearRaizFirefox(home, ".config/mozilla/firefox", true); //$NON-NLS-1$
 		assertEquals(antigua, NssLinuxDatabases.firefoxRoot(home));
-		assertEquals(Collections.singletonList(antigua), NssLinuxDatabases.firefoxRoots(home));
+		assertEquals(Arrays.asList(antigua, xdg), NssLinuxDatabases.firefoxRoots(home));
 	}
 
-	/** Un directorio tradicional sin profiles.ini tapa a la XDG, como en Firefox. @throws Exception En cualquier error. */
+	/** Un directorio tradicional sin profiles.ini tapa a la XDG al leer, pero firefoxRoots la sigue devolviendo. @throws Exception En cualquier error. */
 	@Test
 	public void tradicionalSinIniYXdg() throws Exception {
 		final File home = home();
 		Files.createDirectories(new File(home, ".mozilla/firefox").toPath()); //$NON-NLS-1$
-		crearRaizFirefox(home, ".config/mozilla/firefox", true); //$NON-NLS-1$
+		final File xdg = crearRaizFirefox(home, ".config/mozilla/firefox", true); //$NON-NLS-1$
 		assertNull(NssLinuxDatabases.firefoxRoot(home));
-		assertTrue(NssLinuxDatabases.firefoxRoots(home).isEmpty());
+		assertEquals(Collections.singletonList(xdg), NssLinuxDatabases.firefoxRoots(home));
 		assertTrue(NssLinuxDatabases.findDatabases(home).isEmpty());
 	}
 
