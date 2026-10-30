@@ -47,7 +47,8 @@ final class RestoreConfigLinux implements RestoreConfig {
     private static final String KS_FILENAME = "autofirma.pfx"; //$NON-NLS-1$
     private static final String FILE_AUTOFIRMA_CERTIFICATE = "Autofirma_ROOT.cer"; //$NON-NLS-1$
     private static final String KS_PASSWORD = "654321"; //$NON-NLS-1$
-    private static final String PROTOCOL_HANDLER_CONFIG_FILE = "autofirma.js"; //$NON-NLS-1$
+    static final String PROTOCOL_HANDLER_RESOURCE = "/linux/autofirma.js"; //$NON-NLS-1$
+    static final String PROTOCOL_HANDLER_TARGET_FILE = "AutoFirma.js"; //$NON-NLS-1$
     private static final String DEFAULT_PROTOCOL_HANDLER_CONFIG_DIR = "/etc/firefox/pref"; //$NON-NLS-1$
     static final String EXPORT_PATH = "export PATH=$PATH:"; //$NON-NLS-1$
     static final String EXPORT_LD_LIBRARY ="export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:"; //$NON-NLS-1$
@@ -423,28 +424,43 @@ final class RestoreConfigLinux implements RestoreConfig {
 		return isRunning;
 	}
 
+	/** Lee el contenido del fichero de configuraci&oacute;n del protocolo afirma.
+	 * @param is Flujo del recurso interno (puede ser nulo si el recurso no existe).
+	 * @return Contenido del fichero, nunca vac&iacute;o.
+	 * @throws IOException Si el flujo es nulo, est&aacute; vac&iacute;o o no se puede leer. */
+	static byte[] loadProtocolHandlerConfig(final InputStream is) throws IOException {
+		if (is == null) {
+			throw new IOException("No existe el recurso interno " + PROTOCOL_HANDLER_RESOURCE); //$NON-NLS-1$
+		}
+		final byte[] content = AOUtil.getDataFromInputStream(is);
+		if (content == null || content.length == 0) {
+			throw new IOException("El recurso interno " + PROTOCOL_HANDLER_RESOURCE + " esta vacio"); //$NON-NLS-1$ //$NON-NLS-2$
+		}
+		return content;
+	}
+
 	/** Restaura la configuraci&oacute;n del protocolo afirma en Linux
 	 * @param workingDir Directorio en el que se puedan copiar ficheros.
 	 * @throws IOException Si hay problemas leyendo o escribiendo datos. */
 	private static void restoreProtocolHandler(final File workingDir) throws IOException {
 
 		final byte[] configFileContent;
-		try (InputStream is = RestoreConfigLinux.class.getResourceAsStream("/linux/" + PROTOCOL_HANDLER_CONFIG_FILE)) { //$NON-NLS-1$
-			configFileContent = AOUtil.getDataFromInputStream(is);
+		try (InputStream is = RestoreConfigLinux.class.getResourceAsStream(PROTOCOL_HANDLER_RESOURCE)) {
+			configFileContent = loadProtocolHandlerConfig(is);
 		}
 		catch (final Exception e) {
 			LOGGER.warning("No se ha podido obtener el contenido del fichero interno " + //$NON-NLS-1$
-					PROTOCOL_HANDLER_CONFIG_FILE + ": " + e); //$NON-NLS-1$
-			throw new IOException("No se ha podido obtener el contenido del fichero interno " + PROTOCOL_HANDLER_CONFIG_FILE, e); //$NON-NLS-1$
+					PROTOCOL_HANDLER_TARGET_FILE + ": " + e); //$NON-NLS-1$
+			throw new IOException("No se ha podido obtener el contenido del fichero interno " + PROTOCOL_HANDLER_TARGET_FILE, e); //$NON-NLS-1$
 		}
 
-		final File configFile = new File(workingDir, PROTOCOL_HANDLER_CONFIG_FILE);
+		final File configFile = new File(workingDir, PROTOCOL_HANDLER_TARGET_FILE);
 
 		try {
 			RestoreConfigUtil.installFile(configFileContent, configFile);
 		}
 		catch (final Exception e) {
-			LOGGER.warning("No se pudo copiar a disco el fichero de configuracion " + PROTOCOL_HANDLER_CONFIG_FILE); //$NON-NLS-1$
+			LOGGER.warning("No se pudo copiar a disco el fichero de configuracion " + PROTOCOL_HANDLER_TARGET_FILE); //$NON-NLS-1$
 			throw new IOException("No se pudo copiar a disco el fichero de configuracion ", e); //$NON-NLS-1$
 		}
 
@@ -465,7 +481,7 @@ final class RestoreConfigLinux implements RestoreConfig {
 		for (final String firefoxPreferencesPath : paths) {
 			if (new File(firefoxPreferencesPath).isDirectory()) {
 				scriptContent.append("cp -f \"") .append(configFile.getAbsolutePath()).append("\" \"") //$NON-NLS-1$ //$NON-NLS-2$
-				.append(firefoxPreferencesPath + File.separator + PROTOCOL_HANDLER_CONFIG_FILE).append("\"\n"); //$NON-NLS-1$
+				.append(firefoxPreferencesPath + File.separator + PROTOCOL_HANDLER_TARGET_FILE).append("\"\n"); //$NON-NLS-1$
 			}
 		}
 
