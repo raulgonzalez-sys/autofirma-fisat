@@ -2,7 +2,6 @@ package es.gob.afirma.standalone.ui.restoreconfig;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
@@ -73,33 +72,5 @@ public final class RestoreConfigLinuxTest {
 	@Test
 	public void destinoEsAutoFirmaJs() {
 		assertEquals("AutoFirma.js", RestoreConfigLinux.PROTOCOL_HANDLER_TARGET_FILE); //$NON-NLS-1$
-	}
-
-	/** La deteccion de procesos mira el nombre del proceso, no su ruta. */
-	@Test
-	public void detectaProcesosPorNombre() throws Exception {
-		final File proc = java.nio.file.Files.createTempDirectory("proc").toFile(); //$NON-NLS-1$
-		try {
-			for (final String[] p : new String[][] { { "1", "systemd" }, { "42", "chrome" }, { "abc", "firefox" } }) { //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$ //$NON-NLS-5$ //$NON-NLS-6$
-				final File dir = new File(proc, p[0]);
-				assertTrue(dir.mkdir());
-				Files.write(new File(dir, "comm").toPath(), (p[1] + "\n").getBytes(StandardCharsets.UTF_8)); //$NON-NLS-1$ //$NON-NLS-2$
-			}
-			assertTrue(RestoreConfigLinux.isProcessRunningLinux(proc, "chrome")); //$NON-NLS-1$
-			assertTrue(RestoreConfigLinux.isProcessRunningLinux(proc, "firefox-esr", "chrome")); //$NON-NLS-1$ //$NON-NLS-2$
-			// "abc" no es un PID: se ignora
-			assertFalse(RestoreConfigLinux.isProcessRunningLinux(proc, "firefox")); //$NON-NLS-1$
-			assertFalse(RestoreConfigLinux.isProcessRunningLinux(proc, "chromium")); //$NON-NLS-1$
-			assertFalse(RestoreConfigLinux.isProcessRunningLinux(new File(proc, "no-existe"), "chrome")); //$NON-NLS-1$ //$NON-NLS-2$
-		}
-		finally {
-			for (final File d : proc.listFiles()) {
-				for (final File f : d.listFiles()) {
-					f.delete();
-				}
-				d.delete();
-			}
-			proc.delete();
-		}
 	}
 }

@@ -339,7 +339,7 @@ final class RestoreConfigLinux implements RestoreConfig {
 	 */
 	private static boolean closeFirefox(final Component parent) {
 
-		if (isProcessRunningLinux(FIREFOX_PROCESSES)) { //$NON-NLS-1$
+		if (isProcessRunningLinux("/usr/lib/firefox/firefox").booleanValue()) { //$NON-NLS-1$
 			JOptionPane.showMessageDialog(
 					parent,
 					SimpleAfirmaMessages.getString("RestoreApplication.7"), //$NON-NLS-1$
@@ -349,7 +349,7 @@ final class RestoreConfigLinux implements RestoreConfig {
 
 		int option = JOptionPane.OK_OPTION;
 		while (option == JOptionPane.OK_OPTION
-				&& isProcessRunningLinux(FIREFOX_PROCESSES)) { //$NON-NLS-1$
+				&& isProcessRunningLinux("/usr/lib/firefox/firefox").booleanValue()) { //$NON-NLS-1$
 
 			option = JOptionPane.showConfirmDialog(
 					parent,
@@ -368,7 +368,7 @@ final class RestoreConfigLinux implements RestoreConfig {
 	 */
 	private static void closeChrome(final Component parent) {
 
-		if (isProcessRunningLinux(CHROME_PROCESSES)) { //$NON-NLS-1$
+		if (isProcessRunningLinux("/opt/google/chrome/chrome").booleanValue()) { //$NON-NLS-1$
 			JOptionPane.showMessageDialog(
 					parent,
 					SimpleAfirmaMessages.getString("RestoreApplication.8"), //$NON-NLS-1$
@@ -378,7 +378,7 @@ final class RestoreConfigLinux implements RestoreConfig {
 
 		int option = JOptionPane.OK_OPTION;
 		while (option == JOptionPane.OK_OPTION
-				&& isProcessRunningLinux(CHROME_PROCESSES)) { //$NON-NLS-1$
+				&& isProcessRunningLinux("/opt/google/chrome/chrome").booleanValue()) { //$NON-NLS-1$
 			option = JOptionPane.showConfirmDialog(
 					parent,
 					SimpleAfirmaMessages.getString("RestoreApplication.11"), //$NON-NLS-1$
@@ -387,43 +387,41 @@ final class RestoreConfigLinux implements RestoreConfig {
 		}
 	}
 
-	/** Nombres de proceso de Firefox (Debian instala {@code firefox-esr}). */
-	private static final String[] FIREFOX_PROCESSES = { "firefox-esr", "firefox" }; //$NON-NLS-1$ //$NON-NLS-2$
+	/**
+	 * Determina si un proceso est&aacute; corriendo en Linux
+	 * @param process Nombre del proceso a buscar mediante comando ps
+	 * @return {@code true} si el proceso est&aacute; corriendo {@code false} en caso contrario.
+	 */
+	private static Boolean isProcessRunningLinux(final String process) {
 
-	/** Nombre de proceso de Google Chrome. */
-	private static final String[] CHROME_PROCESSES = { "chrome" }; //$NON-NLS-1$
+		String line;
+		String pidInfo =""; //$NON-NLS-1$
+		Boolean isRunning = Boolean.FALSE;
 
-	private static boolean isProcessRunningLinux(final String... names) {
-		return isProcessRunningLinux(new File("/proc"), names); //$NON-NLS-1$
-	}
+		Process p;
+		try {
 
-	/** Determina si hay un proceso en marcha con alguno de esos nombres, por el {@code comm} de cada
-	 * {@code /proc/<pid>} y no por la ruta del ejecutable.
-	 * @param procDir Directorio {@code /proc}.
-	 * @param names Nombres de proceso (de hasta 15 caracteres, como los guarda el n&uacute;cleo).
-	 * @return {@code true} si alguno est&aacute; en marcha. */
-	static boolean isProcessRunningLinux(final File procDir, final String... names) {
-		final File[] processes = procDir.listFiles();
-		if (processes == null) {
-			return false;
-		}
-		for (final File process : processes) {
-			if (!process.getName().matches("[0-9]+")) { //$NON-NLS-1$
-				continue;
-			}
-			try {
-				final String comm = new String(Files.readAllBytes(new File(process, "comm").toPath()), StandardCharsets.UTF_8).trim(); //$NON-NLS-1$
-				for (final String name : names) {
-					if (name.equals(comm)) {
-						return true;
-					}
+			final String[] commands = { "/bin/bash", "-c", "ps -aux"}; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+
+			p = executeProcess(commands);
+
+			try (final BufferedReader input = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+
+				while ((line = input.readLine()) != null) {
+					pidInfo += line;
 				}
 			}
-			catch (final IOException e) {
-				// El proceso ha terminado o no se puede leer
-			}
+
+		} catch (final IOException e) {
+			LOGGER.severe("Error al detectar si el proceso " + process + " esta activo: " + e.getMessage()); //$NON-NLS-1$ //$NON-NLS-2$
 		}
-		return false;
+
+		if(pidInfo.contains(process))
+		{
+		    isRunning = Boolean.TRUE;
+		}
+
+		return isRunning;
 	}
 
 	/** Lee el contenido del fichero de configuraci&oacute;n del protocolo afirma.
