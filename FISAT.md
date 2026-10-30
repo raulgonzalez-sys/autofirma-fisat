@@ -126,6 +126,8 @@ Clases que ejecuta el job `pruebas` (`-Dtest` del workflow). JUnit 4, nombre
 | `TestConfiguratorFirefoxLinux` | `afirma-ui-simple-configurator` | I7 |
 | `TestConfiguratorFirefoxCommon` | `afirma-ui-simple-configurator` | D1 |
 | `TestCertUtil` | `afirma-ui-simple-configurator` | línea base (ya existía) |
+| `NativeFileDialogsTest` | `afirma-ui-core-jse` | f22 diálogos nativos |
+| `JSEUIManagerNativeDialogsTest` | `afirma-ui-core-jse` | f22 diálogos nativos |
 
 ## Notas operativas
 
@@ -134,3 +136,31 @@ Clases que ejecuta el job `pruebas` (`-Dtest` del workflow). JUnit 4, nombre
 - El paso por usuario registra en `~/.local/state/autofirma-fisat/usuario.log`
   y se diagnostica con `/usr/lib/Autofirma/fisat-usuario.sh --check` (sale 0
   si está todo bien, 1 si hay algo pendiente, 2 si hay error).
+
+### Diálogos de ficheros (Linux)
+
+- Orden: `kdialog` si la sesión es KDE (`XDG_CURRENT_DESKTOP` contiene `KDE`),
+  si no `zenity`, y si no hay ninguno el `JFileChooser` de Java. Cubre abrir
+  uno o varios ficheros, guardar y elegir carpeta.
+- Cancelar en el diálogo nativo cancela la operación (no se abre después el de
+  Java).
+- Se cae al `JFileChooser` si la herramienta nativa no arranca, se muere, sale
+  con un código distinto de 0 (aceptar) o 1 (cancelar) o devuelve una ruta no
+  local (p. ej. `smb://`).
+- Forzar el de Java: `AUTOFIRMA_FISAT_DIALOGOS=java` en el entorno o
+  `-Des.gob.afirma.fisat.dialogos=java` en la JVM.
+- El paquete recomienda (`Recommends`, no `Depends`) `kdialog | zenity`.
+- Mientras el diálogo nativo está abierto, las ventanas de AutoFirma no
+  admiten clics ni teclado (como con el `JFileChooser` modal) pero siguen
+  repintándose: el proceso se espera en un hilo auxiliar con un bucle
+  secundario de eventos.
+- Filtros de `kdialog`: `Desc (*.a *.A)|Todos (*)`; `kdialog` cambia `|` por
+  salto de línea y Qt separa ahí los filtros (comprobado en el código de
+  `kdialog` v25.04.0, `setFileDialogFilter`).
+- Limitaciones: el diálogo nativo no tiene ventana padre; con `kdialog` puede
+  salir un doble aviso de sobrescritura (el de KDE y el de AutoFirma); al
+  guardar sin extensión se añade la del filtro por defecto (kdialog y zenity no
+  informan del filtro elegido).
+- Diagnóstico: el log de AutoFirma registra la herramienta nativa usada y el
+  motivo de cada caída al `JFileChooser` (código de salida o error al
+  ejecutarla).
