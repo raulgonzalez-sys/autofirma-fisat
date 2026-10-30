@@ -1,25 +1,26 @@
 #!/bin/bash
 aviso() { echo "autofirma $0: AVISO: $*" >&2; }
 
-# Quita la extension CSP de policies.json solo al desinstalar (nunca al actualizar).
-# Tiene que ser aqui: dpkg borra los ficheros del paquete antes de postrm y el lanzador ya no existiria
+# Todo solo al desinstalar (nunca al actualizar): al actualizar se conservan autofirma.pfx y la CA,
+# y restaurar --sistema del postinst los reutiliza sin regenerarlos.
+# La extension CSP se quita aqui y no en postrm: dpkg borra los ficheros del paquete antes de postrm y el lanzador ya no existiria
 case "$1" in
 	remove|deconfigure)
 		/usr/bin/autofirma restaurar --quitar-politicas || aviso "no se pudo quitar la extension CSP de las politicas de Firefox"
+
+		# Eliminamos el enlace creado por la restauracion del sistema y el heredado del paquete oficial
+		rm -f /etc/firefox-esr/pref/AutoFirma.js /etc/firefox-esr/pref/Autofirma.js || aviso "no se pudieron borrar los enlaces AutoFirma.js de firefox-esr"
+
+		# borramos los certificados instalados en el almacenamiento del sistema
+		rm -rf /usr/share/ca-certificates/Autofirma || aviso "no se pudo borrar /usr/share/ca-certificates/Autofirma"
+		rm -f /usr/local/share/ca-certificates/Autofirma_ROOT.crt || aviso "no se pudo borrar Autofirma_ROOT.crt"
+		rm -f /usr/lib/Autofirma/autofirma.pfx || aviso "no se pudo borrar autofirma.pfx"
+		rm -f /usr/lib/Autofirma/Autofirma_ROOT.cer || aviso "no se pudo borrar Autofirma_ROOT.cer"
+
+		update-ca-certificates || aviso "update-ca-certificates ha fallado"
+
+		echo "Se ha borrado el certificado CA en el almacenamiento del sistema"
 		;;
 esac
-
-# Eliminamos el enlace creado por la restauracion del sistema y el heredado del paquete oficial
-rm -f /etc/firefox-esr/pref/AutoFirma.js /etc/firefox-esr/pref/Autofirma.js || aviso "no se pudieron borrar los enlaces AutoFirma.js de firefox-esr"
-
-# borramos los certificados instalados en el almacenamiento del sistema
-rm -rf /usr/share/ca-certificates/Autofirma || aviso "no se pudo borrar /usr/share/ca-certificates/Autofirma"
-rm -f /usr/local/share/ca-certificates/Autofirma_ROOT.crt || aviso "no se pudo borrar Autofirma_ROOT.crt"
-rm -f /usr/lib/Autofirma/autofirma.pfx || aviso "no se pudo borrar autofirma.pfx"
-rm -f /usr/lib/Autofirma/Autofirma_ROOT.cer || aviso "no se pudo borrar Autofirma_ROOT.cer"
-
-update-ca-certificates || aviso "update-ca-certificates ha fallado"
-
-echo "Se ha borrado el certificado CA en el almacenamiento del sistema"
 
 exit 0

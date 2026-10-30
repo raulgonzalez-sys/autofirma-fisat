@@ -163,12 +163,27 @@ chk_restaurar() {
 	[ -z "$obsoletos" ] || { echo "los maintainer scripts usan piezas retiradas: $obsoletos"; return 1; }
 }
 
-# El lanzador del paquete arranca con exec java y no llama a ningún paso por usuario
+# prerm borra autofirma.pfx, la CA y su copia en el almacén del sistema solo en remove|deconfigure:
+# al actualizar se conservan y restaurar --sistema no los regenera
+chk_prerm_ca() {
+	local re='autofirma\.pfx|Autofirma_ROOT\.(cer|crt)|ca-certificates/Autofirma|update-ca-certificates' fuera f
+	fuera=$(awk -v re="$re" '/^[[:space:]]*remove\|deconfigure\)/ {d=1} d==0 && $0 ~ re && !/^[[:space:]]*#/ {print} /;;/ {d=0}' "$X/DEBIAN/prerm")
+	[ -z "$fuera" ] || { echo "prerm borra el almacén SSL o la CA fuera de remove|deconfigure: $fuera"; return 1; }
+	for f in /usr/lib/Autofirma/autofirma.pfx /usr/lib/Autofirma/Autofirma_ROOT.cer; do
+		awk -v f="$f" '/^[[:space:]]*remove\|deconfigure\)/ {d=1} d==1 && /^[[:space:]]*rm[[:space:]]/ && index($0, f) {e=1} /;;/ {d=0} END {exit !e}' "$X/DEBIAN/prerm" \
+			|| { echo "prerm no borra $f en remove|deconfigure"; return 1; }
+	done
+}
+
+# El lanzador arranca con exec java (restaurar con -cp a su clase, sin cargar SimpleAfirma) y no llama a ningún paso por usuario
 chk_lanzador() {
 	local f=$X/usr/bin/autofirma
 	[ -f "$f" ] || { echo "falta ./usr/bin/autofirma"; return 1; }
-	grep -Eq '^[[:space:]]*exec java' "$f" || { echo "el lanzador no contiene 'exec java'"; return 1; }
+	grep -Eq '^exec java .*-jar /usr/lib/Autofirma/autofirma\.jar "\$@"$' "$f" || { echo "el lanzador no arranca la aplicación con 'exec java ... -jar'"; return 1; }
+	grep -Eq '^[[:space:]]+exec java .*-cp /usr/lib/Autofirma/autofirma\.jar' "$f" || { echo "el lanzador no ejecuta restaurar con 'exec java ... -cp'"; return 1; }
 	! grep -Fq 'fisat-usuario' "$f" || { echo "el lanzador menciona fisat-usuario"; return 1; }
+	grep -Eq '^[[:space:]]*es\.gob\.afirma\.standalone\.ui\.restoreconfig\.linux\.RestoreCommandLinux "\$@"' "$f" \
+		|| { echo "el lanzador no lleva restaurar a RestoreCommandLinux"; return 1; }
 }
 
 # Sin scripts por usuario, ni su autostart ni ningún otro fichero bajo ./etc/xdg

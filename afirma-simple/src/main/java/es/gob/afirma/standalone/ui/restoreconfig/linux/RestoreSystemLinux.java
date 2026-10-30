@@ -66,8 +66,8 @@ public final class RestoreSystemLinux {
 	 * es la &uacute;ltima defensa: {@code timeout} dentro de {@code runuser} acota antes todo el &aacute;rbol. */
 	private static final long HOME_TIMEOUT_SECONDS = 60;
 
-	/** {@code timeout} dentro de {@code runuser}: TERM a los 55 s y KILL 5 s despu&eacute;s, antes del l&iacute;mite exterior. */
-	private static final String INNER_TIMEOUT_SECONDS = "55"; //$NON-NLS-1$
+	/** {@code timeout} dentro de {@code runuser}: TERM a los 50 s y KILL 5 s despu&eacute;s, antes del l&iacute;mite exterior. */
+	private static final String INNER_TIMEOUT_SECONDS = "50"; //$NON-NLS-1$
 	private static final String INNER_KILL_AFTER_SECONDS = "5"; //$NON-NLS-1$
 
 	/** Tiempo m&aacute;ximo de {@code getent}. */
@@ -84,6 +84,17 @@ public final class RestoreSystemLinux {
 		int uid(Path path) throws IOException;
 	}
 
+	/** Resuelve el nombre de usuario de un UID. */
+	interface UserNames {
+		/** Por {@code getent passwd}. */
+		UserNames GETENT = RestoreSystemLinux::userName;
+
+		/** Nombre de usuario de un UID.
+		 * @param uid UID.
+		 * @return Nombre o {@code null} si el UID no resuelve. */
+		String name(int uid);
+	}
+
 	private RestoreSystemLinux() {
 		// No se permite la instanciacion
 	}
@@ -96,11 +107,11 @@ public final class RestoreSystemLinux {
 	 * @param report Informe que recibe las l&iacute;neas {@code OK}, {@code AVISO} y {@code ERROR}.
 	 * @return 0 si la parte de sistema ha ido bien aunque falle alg&uacute;n home; 1 si ha fallado. */
 	public static int restore(final File appDir, final File etcDir, final List<File> homes, final RestoreReport report) {
-		return restore(appDir, etcDir, homes, report, UidReader.FILES);
+		return restore(appDir, etcDir, homes, report, UidReader.FILES, UserNames.GETENT);
 	}
 
 	static int restore(final File appDir, final File etcDir, final List<File> homes, final RestoreReport report,
-			final UidReader uids) {
+			final UidReader uids, final UserNames names) {
 		final File ca = restoreCa(appDir, report);
 		final boolean jsOk = restoreProtocolHandler(etcDir, report);
 		final boolean policiesOk = restorePolicies(etcDir, report);
@@ -114,7 +125,7 @@ public final class RestoreSystemLinux {
 			RestoreUserLinux.restore(skel, ca, report);
 		}
 		for (final File home : homes) {
-			restoreHome(home, report, uids);
+			restoreHome(home, report, uids, names);
 		}
 		return jsOk && policiesOk ? 0 : 1;
 	}
@@ -235,8 +246,10 @@ public final class RestoreSystemLinux {
 
 	// --- Homes ---
 
-	/** Restaura un home con la identidad de su due&ntilde;o; si el due&ntilde;o no resuelve, lo salta con AVISO. */
-	private static void restoreHome(final File home, final RestoreReport report, final UidReader uids) {
+	/** Restaura un home con la identidad de su due&ntilde;o; si el directorio es de root o de una cuenta de
+	 * sistema (UID &lt; 1000), o su due&ntilde;o no resuelve, lo salta con AVISO. */
+	private static void restoreHome(final File home, final RestoreReport report, final UidReader uids,
+			final UserNames names) {
 		final int uid;
 		try {
 			uid = uids.uid(home.toPath());
@@ -245,7 +258,12 @@ public final class RestoreSystemLinux {
 			report.warning("No se puede leer el dueño de " + home + " (" + e + "); se salta"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
 			return;
 		}
-		final String owner = userName(uid);
+		// Un home de passwd cuyo directorio es de root ejecutaria la parte de usuario como root
+		if (uid < FIRST_USER_UID) {
+			report.warning("El directorio " + home + " es de root o de una cuenta de sistema (UID " + uid + "); se salta"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+			return;
+		}
+		final String owner = names.name(uid);
 		if (owner == null) {
 			report.warning("El dueño de " + home + " (UID " + uid + ") no está en getent passwd; se salta"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
 			return;

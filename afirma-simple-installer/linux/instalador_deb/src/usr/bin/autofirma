@@ -12,11 +12,19 @@ case ${locale_car,,} in
 	;;
 esac
 
-exec java \
-	-Dswing.defaultlaf=javax.swing.plaf.nimbus.NimbusLookAndFeel \
-	-Dswing.systemlaf=javax.swing.plaf.nimbus.NimbusLookAndFeel \
-	-Dswing.crossplatformlaf=javax.swing.plaf.nimbus.NimbusLookAndFeel \
-	-Dawt.useSystemAAFontSettings=on \
-	-Dswing.aatext=true \
-	-Djdk.tls.maxHandshakeMessageSize=65536 \
-	-jar /usr/lib/Autofirma/autofirma.jar "$@"
+opciones=(
+	-Dswing.defaultlaf=javax.swing.plaf.nimbus.NimbusLookAndFeel
+	-Dswing.systemlaf=javax.swing.plaf.nimbus.NimbusLookAndFeel
+	-Dswing.crossplatformlaf=javax.swing.plaf.nimbus.NimbusLookAndFeel
+	-Dawt.useSystemAAFontSettings=on
+	-Dswing.aatext=true
+	-Djdk.tls.maxHandshakeMessageSize=65536
+)
+
+# restaurar va directo a su clase: la de la aplicacion (SimpleAfirma) crea ~/.afirma al cargarse
+if [ "${1:-}" = restaurar ]; then
+	exec java "${opciones[@]}" -cp /usr/lib/Autofirma/autofirma.jar \
+		es.gob.afirma.standalone.ui.restoreconfig.linux.RestoreCommandLinux "$@"
+fi
+
+exec java "${opciones[@]}" -jar /usr/lib/Autofirma/autofirma.jar "$@"

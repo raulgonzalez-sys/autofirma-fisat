@@ -76,6 +76,23 @@ chk_rc prerm_con_uninstall 1 sobre restaurar prerm_con_uninstall
 mutar prerm_con_script_usuario sed -i '/^exit 0/i /usr/lib/Autofirma/fisat-retirar.sh || aviso x' DEBIAN/prerm
 chk_rc prerm_con_script_usuario 1 sobre restaurar prerm_con_script_usuario
 
+# --- prerm conserva el almacén SSL y la CA al actualizar ---
+chk_rc prerm_ca_real 0 "$DEB/verificar_paquete.sh" --solo prerm_ca "$T/out/$NOMBRE"
+mutar prerm_ca_pfx_fuera sed -i '/^case /i rm -f /usr/lib/Autofirma/autofirma.pfx || aviso x' DEBIAN/prerm
+chk_rc prerm_ca_pfx_fuera 1 sobre prerm_ca prerm_ca_pfx_fuera
+mutar prerm_ca_cer_fuera sed -i '/^exit 0/i rm -f /usr/lib/Autofirma/Autofirma_ROOT.cer || aviso x' DEBIAN/prerm
+chk_rc prerm_ca_cer_fuera 1 sobre prerm_ca prerm_ca_cer_fuera
+mutar prerm_ca_update_fuera sed -i '/^exit 0/i update-ca-certificates || aviso x' DEBIAN/prerm
+chk_rc prerm_ca_update_fuera 1 sobre prerm_ca prerm_ca_update_fuera
+mutar prerm_ca_en_upgrade sed -i 's/^\tremove|deconfigure)/\tremove|deconfigure|upgrade)/' DEBIAN/prerm
+chk_rc prerm_ca_en_upgrade 1 sobre prerm_ca prerm_ca_en_upgrade
+mutar prerm_ca_sin_borrar_pfx sed -i '/autofirma\.pfx ||/d' DEBIAN/prerm
+chk_rc prerm_ca_sin_borrar_pfx 1 sobre prerm_ca prerm_ca_sin_borrar_pfx
+
+# --- El lanzador lleva restaurar a su clase ---
+mutar lanzador_restaurar_con_jar sed -i 's/^\t\tes\.gob\.afirma\.standalone\.ui\.restoreconfig\.linux\.RestoreCommandLinux "\$@"/\t\t"$@"/' usr/bin/autofirma
+chk_rc lanzador_restaurar_con_jar 1 sobre lanzador lanzador_restaurar_con_jar
+
 # --- Enlaces de preferencias de Firefox ---
 chk_rc prefs_real 0 "$DEB/verificar_paquete.sh" --solo prefs_firefox "$T/out/$NOMBRE"
 mutar prefs_sin_fichero rm etc/firefox/pref/AutoFirma.js

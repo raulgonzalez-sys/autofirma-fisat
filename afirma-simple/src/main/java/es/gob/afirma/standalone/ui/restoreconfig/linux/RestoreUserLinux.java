@@ -106,6 +106,10 @@ public final class RestoreUserLinux {
 		final List<File> databases = new ArrayList<>();
 		final Set<Path> seen = new HashSet<>();
 		for (final File profile : profiles) {
+			if (!new File(profile, CERT_DB).isFile()) {
+				report.warning("El perfil de Firefox " + profile + " no tiene base de certificados (" + CERT_DB //$NON-NLS-1$ //$NON-NLS-2$
+						+ "): no se instala en él el certificado raíz; abra Firefox con ese perfil y vuelva a restaurar"); //$NON-NLS-1$
+			}
 			addDatabase(profile, databases, seen);
 		}
 		addDatabase(NssLinuxDatabases.chromeDatabase(home), databases, seen);

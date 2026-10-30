@@ -56,13 +56,16 @@ final class RestoreConfigPanelLinux {
 		return Arrays.asList(PKEXEC, LAUNCHER, "restaurar", "--sistema"); //$NON-NLS-1$ //$NON-NLS-2$
 	}
 
-	/** Mensaje final de la restauraci&oacute;n del sistema seg&uacute;n el c&oacute;digo de salida de {@code pkexec}.
+	/** Mensaje final de la restauraci&oacute;n del sistema seg&uacute;n el c&oacute;digo de salida de {@code pkexec}
+	 * y las l&iacute;neas {@code ERROR} de su salida: {@code --sistema} sale con 0 aunque falle alg&uacute;n home.
 	 * @param exitCode C&oacute;digo de salida.
+	 * @param errorLines L&iacute;neas {@code ERROR} le&iacute;das de la salida.
 	 * @return Mensaje en el idioma de la aplicaci&oacute;n. */
-	static String messageForExit(final int exitCode) {
+	static String messageForExit(final int exitCode, final int errorLines) {
 		switch (exitCode) {
 			case 0:
-				return SimpleAfirmaMessages.getString("RestoreConfigPanelLinux.6"); //$NON-NLS-1$
+				return SimpleAfirmaMessages.getString(errorLines > 0
+						? "RestoreConfigPanelLinux.7" : "RestoreConfigPanelLinux.6"); //$NON-NLS-1$ //$NON-NLS-2$
 			case 1:
 				return SimpleAfirmaMessages.getString("RestoreConfigPanelLinux.7"); //$NON-NLS-1$
 			case PKEXEC_NOT_AUTHORIZED:
@@ -137,9 +140,13 @@ final class RestoreConfigPanelLinux {
 		final Thread errReader = new Thread(() -> drain(p.getErrorStream(), err));
 		errReader.setDaemon(true);
 		errReader.start();
+		int errorLines = 0;
 		try (BufferedReader in = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
 			String line;
 			while ((line = in.readLine()) != null) {
+				if (line.startsWith(RestoreReport.ERROR)) {
+					errorLines++;
+				}
 				panel.appendMessage(line);
 			}
 		}
@@ -160,7 +167,7 @@ final class RestoreConfigPanelLinux {
 			LOGGER.warning("La restauracion del sistema ha terminado con codigo " + code + ": " //$NON-NLS-1$ //$NON-NLS-2$
 					+ new String(err.toByteArray(), StandardCharsets.UTF_8).trim());
 		}
-		panel.appendMessage(messageForExit(code));
+		panel.appendMessage(messageForExit(code, errorLines));
 	}
 
 	private static void drain(final InputStream is, final ByteArrayOutputStream out) {

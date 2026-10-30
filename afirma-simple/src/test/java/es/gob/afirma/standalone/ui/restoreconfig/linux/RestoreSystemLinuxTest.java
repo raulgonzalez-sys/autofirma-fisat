@@ -217,11 +217,15 @@ public final class RestoreSystemLinuxTest {
 		return script;
 	}
 
+	/** Nombres de prueba: 1000 es {@code ana} y 1001 {@code bea}; el resto, por {@code getent passwd}. */
+	private static final RestoreSystemLinux.UserNames NAMES = uid -> uid == 1000 ? "ana" //$NON-NLS-1$
+			: uid == 1001 ? "bea" : RestoreSystemLinux.UserNames.GETENT.name(uid); //$NON-NLS-1$
+
 	private static int restoreWithCommand(final File command, final File app, final File etc, final List<File> homes,
 			final RestoreReport report, final RestoreSystemLinux.UidReader uids) {
 		RestoreSystemLinux.testUserCommand = command.getPath();
 		try {
-			return RestoreSystemLinux.restore(app, etc, homes, report, uids);
+			return RestoreSystemLinux.restore(app, etc, homes, report, uids, NAMES);
 		}
 		finally {
 			RestoreSystemLinux.testUserCommand = null;
@@ -236,18 +240,17 @@ public final class RestoreSystemLinuxTest {
 		final File a = this.tmp.newFolder("home a"); //$NON-NLS-1$
 		final File orphan = this.tmp.newFolder("sin dueno"); //$NON-NLS-1$
 		final File b = this.tmp.newFolder("home b"); //$NON-NLS-1$
-		final String me = System.getProperty("user.name"); //$NON-NLS-1$
 		final RestoreReport report = new RestoreReport(null);
 		final int code = restoreWithCommand(fakeUserCommand(), appDir(), etcDir(), Arrays.asList(a, orphan, b), report,
-				p -> p.equals(orphan.toPath()) ? 2147000000 : RestoreSystemLinux.UidReader.FILES.uid(p));
+				p -> p.equals(orphan.toPath()) ? 2147000000 : p.equals(a.toPath()) ? 1000 : 1001);
 
 		assertEquals(report.getLines().toString(), 0, code);
 		assertFalse(report.getLines().toString(), report.hasErrors());
 		assertTrue(report.getLines().toString(), hasLine(report, RestoreReport.WARNING, orphan.getPath()));
-		assertTrue(report.getLines().toString(), new File(a, "restaurado-por-" + me).isFile()); //$NON-NLS-1$
-		assertTrue(new File(b, "restaurado-por-" + me).isFile()); //$NON-NLS-1$
+		assertTrue(report.getLines().toString(), new File(a, "restaurado-por-ana").isFile()); //$NON-NLS-1$
+		assertTrue(new File(b, "restaurado-por-bea").isFile()); //$NON-NLS-1$
 		assertEquals(0, orphan.list().length);
-		assertTrue(report.getLines().toString(), report.getLines().contains(RestoreReport.OK + "restaurado " + a.getPath() + " por " + me)); //$NON-NLS-1$ //$NON-NLS-2$
+		assertTrue(report.getLines().toString(), report.getLines().contains(RestoreReport.OK + "restaurado " + a.getPath() + " por ana")); //$NON-NLS-1$ //$NON-NLS-2$
 		assertTrue(report.getLines().toString(), report.getLines().contains(RestoreReport.WARNING + "sin prefijo")); //$NON-NLS-1$
 	}
 
@@ -260,12 +263,41 @@ public final class RestoreSystemLinuxTest {
 		final File good = this.tmp.newFolder("bueno"); //$NON-NLS-1$
 		final RestoreReport report = new RestoreReport(null);
 		final int code = restoreWithCommand(fakeUserCommand(), appDir(), etcDir(), Arrays.asList(bad, good), report,
-				RestoreSystemLinux.UidReader.FILES);
+				p -> 1000);
 		assertEquals(report.getLines().toString(), 0, code);
 		assertTrue(report.hasErrors());
 		assertTrue(report.getLines().toString(), hasLine(report, RestoreReport.ERROR, "fallo simulado en " + bad.getPath())); //$NON-NLS-1$
 		assertTrue(report.getLines().toString(), hasLine(report, RestoreReport.ERROR, "traza")); //$NON-NLS-1$
-		assertTrue(new File(good, "restaurado-por-" + System.getProperty("user.name")).isFile()); //$NON-NLS-1$ //$NON-NLS-2$
+		assertTrue(new File(good, "restaurado-por-ana").isFile()); //$NON-NLS-1$
+	}
+
+	/** Un home de passwd cuyo directorio es de root (UID 0) o de una cuenta de sistema (UID &lt; 1000) se
+	 * salta con un AVISO con su ruta aunque el UID resuelva: la parte de usuario nunca corre como root.
+	 * Los dem&aacute;s se restauran y el retorno es 0.
+	 * @throws Exception En cualquier error. */
+	@Test
+	public void homeDeRootSeSalta() throws Exception {
+		final File rootOwned = this.tmp.newFolder("de root"); //$NON-NLS-1$
+		final File system = this.tmp.newFolder("de sistema"); //$NON-NLS-1$
+		final File good = this.tmp.newFolder("bueno"); //$NON-NLS-1$
+		final RestoreSystemLinux.UserNames names = uid -> uid == 0 ? "root" : uid == 999 ? "servicio" : "ana"; //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+		final RestoreReport report = new RestoreReport(null);
+		RestoreSystemLinux.testUserCommand = fakeUserCommand().getPath();
+		final int code;
+		try {
+			code = RestoreSystemLinux.restore(appDir(), etcDir(), Arrays.asList(rootOwned, system, good), report,
+					p -> p.equals(rootOwned.toPath()) ? 0 : p.equals(system.toPath()) ? 999 : 1000, names);
+		}
+		finally {
+			RestoreSystemLinux.testUserCommand = null;
+		}
+		assertEquals(report.getLines().toString(), 0, code);
+		assertFalse(report.getLines().toString(), report.hasErrors());
+		assertTrue(report.getLines().toString(), hasLine(report, RestoreReport.WARNING, rootOwned.getPath() + " es de root")); //$NON-NLS-1$
+		assertTrue(report.getLines().toString(), hasLine(report, RestoreReport.WARNING, system.getPath() + " es de root")); //$NON-NLS-1$
+		assertEquals(0, rootOwned.list().length);
+		assertEquals(0, system.list().length);
+		assertTrue(report.getLines().toString(), new File(good, "restaurado-por-ana").isFile()); //$NON-NLS-1$
 	}
 
 	/** Homes de {@code passwd} con UID &ge; 1000 que existen y directorios de la ra&iacute;z de homes con
@@ -309,7 +341,7 @@ public final class RestoreSystemLinuxTest {
 	@Test
 	public void comandoPorHome() throws Exception {
 		assertEquals(Arrays.asList("/usr/sbin/runuser", "-u", "ana", "--", //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
-				"/usr/bin/timeout", "-k", "5", "55", //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+				"/usr/bin/timeout", "-k", "5", "50", //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
 				"/usr/bin/env", "HOME=/home/ana", //$NON-NLS-1$ //$NON-NLS-2$
 				"/usr/bin/autofirma", "restaurar", "--usuario"), //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
 				RestoreSystemLinux.userCommand("ana", new File("/home/ana"))); //$NON-NLS-1$ //$NON-NLS-2$

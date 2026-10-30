@@ -103,18 +103,18 @@ public final class RestoreCommandLinuxTest {
 		assertTrue(out.toString(), contains(out, RestoreReport.ERROR));
 	}
 
-	/** El directorio de configuraci&oacute;n de {@code --quitar-politicas} sale de la propiedad del sistema. */
+	/** Con el entorno real, {@code --quitar-politicas} usa el directorio de pruebas en lugar de {@code /etc}. */
 	@Test
-	public void quitarPoliticasPorPropiedad() throws Exception {
+	public void quitarPoliticasConEtcDePrueba() throws Exception {
 		assumeTrue("Hace falta ser root", RestoreCommandLinux.isRoot()); //$NON-NLS-1$
 		final File etc = this.tmp.newFolder("etc"); //$NON-NLS-1$
 		final Path ff = policies(etc, "firefox"); //$NON-NLS-1$
-		System.setProperty(RestoreCommandLinux.ETC_PROPERTY, etc.getPath());
+		RestoreCommandLinux.testEtcDir = etc;
 		try {
 			assertEquals(0, RestoreCommandLinux.run(args("--quitar-politicas"), s -> { /* nada */ })); //$NON-NLS-1$
 		}
 		finally {
-			System.clearProperty(RestoreCommandLinux.ETC_PROPERTY);
+			RestoreCommandLinux.testEtcDir = null;
 		}
 		assertFalse(Files.exists(ff));
 	}
@@ -170,7 +170,44 @@ public final class RestoreCommandLinuxTest {
 		}
 	}
 
-	/** El comando acepta el primer argumento {@code restaurar} que le pasa {@code SimpleAfirma.main}. */
+	/** La entrada real que usa el lanzador ({@code java -cp autofirma.jar RestoreCommandLinux restaurar --usuario}),
+	 * con un home temporal y sin CA del sistema, no crea {@code ~/.afirma}: no carga {@code SimpleAfirma},
+	 * cuyo arranque instala el registro en {@code ~/.afirma}.
+	 * @throws Exception En cualquier error. */
+	@Test
+	public void entradaRealNoCreaAfirma() throws Exception {
+		final File home = this.tmp.newFolder("home real"); //$NON-NLS-1$
+		final String classpath = System.getProperty("surefire.test.class.path", System.getProperty("java.class.path")); //$NON-NLS-1$ //$NON-NLS-2$
+		final ProcessBuilder pb = new ProcessBuilder(
+				new File(System.getProperty("java.home"), "bin/java").getPath(), //$NON-NLS-1$ //$NON-NLS-2$
+				"-Duser.home=" + home.getPath(), //$NON-NLS-1$
+				"-cp", classpath, //$NON-NLS-1$
+				RestoreCommandLinux.class.getName(), "restaurar", "--usuario") //$NON-NLS-1$ //$NON-NLS-2$
+			.redirectErrorStream(true)
+			.redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null"))); //$NON-NLS-1$
+		pb.environment().put("HOME", home.getPath()); //$NON-NLS-1$
+		final Process p = pb.start();
+		final String out;
+		try (java.io.InputStream is = p.getInputStream()) {
+			final java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+			final byte[] b = new byte[4096];
+			int n;
+			while ((n = is.read(b)) != -1) {
+				buf.write(b, 0, n);
+			}
+			out = new String(buf.toByteArray(), StandardCharsets.UTF_8);
+		}
+		assertTrue(out, p.waitFor(60, java.util.concurrent.TimeUnit.SECONDS));
+		final boolean ca = new File(RestoreCommandLinux.CA_FILE).isFile();
+		assertEquals(out, ca ? 0 : 1, p.exitValue());
+		if (!ca) {
+			assertTrue(out, out.contains(RestoreReport.ERROR + "No se puede leer el certificado raíz")); //$NON-NLS-1$
+		}
+		assertFalse(out, new File(home, ".afirma").exists()); //$NON-NLS-1$
+		assertEquals(out, 0, home.list().length);
+	}
+
+	/** El comando acepta el primer argumento {@code restaurar} que le pasa el lanzador. */
 	@Test
 	public void acepta_restaurar_como_primer_argumento() {
 		final List<String> out = new ArrayList<>();

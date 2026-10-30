@@ -70,12 +70,22 @@ public final class RestoreConfigPanelLinuxTest {
 	/** Cancelar pkexec (126 o 127) da un mensaje claro y no el gen&eacute;rico. */
 	@Test
 	public void pkexecCancelado() {
-		final String cancelado = RestoreConfigPanelLinux.messageForExit(126);
-		assertEquals(cancelado, RestoreConfigPanelLinux.messageForExit(127));
+		final String cancelado = RestoreConfigPanelLinux.messageForExit(126, 0);
+		assertEquals(cancelado, RestoreConfigPanelLinux.messageForExit(127, 0));
 		assertTrue(cancelado, cancelado.contains("administrador")); //$NON-NLS-1$
 		assertFalse(cancelado, cancelado.startsWith("!")); //$NON-NLS-1$
-		final String generico = RestoreConfigPanelLinux.messageForExit(3);
+		final String generico = RestoreConfigPanelLinux.messageForExit(3, 0);
 		assertTrue(generico, generico.contains("3")); //$NON-NLS-1$
-		assertFalse(RestoreConfigPanelLinux.messageForExit(0).equals(RestoreConfigPanelLinux.messageForExit(1)));
+		assertFalse(RestoreConfigPanelLinux.messageForExit(0, 0).equals(RestoreConfigPanelLinux.messageForExit(1, 0)));
+	}
+
+	/** Salida 0 con l&iacute;neas ERROR (falla alg&uacute;n home) da &laquo;terminada con errores&raquo;, como la salida 1. */
+	@Test
+	public void sistemaConErroresEnHomes() {
+		final String conErrores = RestoreConfigPanelLinux.messageForExit(1, 0);
+		assertTrue(conErrores, conErrores.contains("errores")); //$NON-NLS-1$
+		assertEquals(conErrores, RestoreConfigPanelLinux.messageForExit(0, 2));
+		assertEquals(conErrores, RestoreConfigPanelLinux.messageForExit(1, 3));
+		assertFalse(RestoreConfigPanelLinux.messageForExit(0, 0).contains("errores")); //$NON-NLS-1$
 	}
 }

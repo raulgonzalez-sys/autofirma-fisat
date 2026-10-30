@@ -29,8 +29,9 @@ import java.util.function.Consumer;
  * C&oacute;digo de salida: 0 correcto, 1 con errores y 2 uso incorrecto o falta de permisos. */
 public final class RestoreCommandLinux {
 
-	/** Propiedad del sistema que sustituye {@code /etc} en {@code --quitar-politicas} (para las pruebas). */
-	static final String ETC_PROPERTY = "es.gob.afirma.fisat.etc"; //$NON-NLS-1$
+	/** Directorio que sustituye {@code /etc} en las pruebas; nulo en producci&oacute;n. Es un campo y no
+	 * una propiedad del sistema para que nada externo pueda cambiar lo que se escribe como root. */
+	static volatile File testEtcDir = null;
 
 	/** Directorio de la aplicaci&oacute;n. */
 	public static final String APP_DIR = "/usr/lib/Autofirma"; //$NON-NLS-1$
@@ -73,9 +74,8 @@ public final class RestoreCommandLinux {
 	 * @param out Recibe cada l&iacute;nea de salida.
 	 * @return C&oacute;digo de salida. */
 	public static int run(final String[] args, final Consumer<String> out) {
-		final String option = option(args);
-		final File etc = REMOVE_POLICIES.equals(option) ? new File(System.getProperty(ETC_PROPERTY, ETC)) : new File(ETC);
-		return run(args, out, isRoot(), System.getenv("HOME"), new File(CA_FILE), etc); //$NON-NLS-1$
+		final File test = testEtcDir;
+		return run(args, out, isRoot(), System.getenv("HOME"), new File(CA_FILE), test != null ? test : new File(ETC)); //$NON-NLS-1$
 	}
 
 	static int run(final String[] args, final Consumer<String> out, final boolean root, final String envHome,

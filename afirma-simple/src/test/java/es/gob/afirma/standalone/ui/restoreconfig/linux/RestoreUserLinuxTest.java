@@ -312,6 +312,30 @@ public final class RestoreUserLinuxTest {
 				Files.readAllLines(new File(ff, "user.js").toPath(), StandardCharsets.UTF_8)); //$NON-NLS-1$
 	}
 
+	/** Un perfil de Firefox sin {@code cert9.db} deja un AVISO con su ruta (no se instala la CA en &eacute;l)
+	 * y recibe {@code user.js} y {@code handlers.json}; el perfil con base no avisa y recibe la CA.
+	 * @throws Exception En cualquier error. */
+	@Test
+	public void perfilSinCert9Avisa() throws Exception {
+		final File home = home();
+		final File root = new File(home, LEGACY_ROOT);
+		final File sinBase = new File(root, "sin.base"); //$NON-NLS-1$
+		final File conBase = new File(root, "con.base"); //$NON-NLS-1$
+		assertTrue(sinBase.mkdirs());
+		newDb(conBase);
+		Files.write(new File(root, "profiles.ini").toPath(), //$NON-NLS-1$
+				"[Profile0]\nName=a\nIsRelative=1\nPath=sin.base\n\n[Profile1]\nName=b\nIsRelative=1\nPath=con.base\n" //$NON-NLS-1$
+						.getBytes(StandardCharsets.UTF_8));
+		final RestoreReport report = restore(home);
+		assertFalse(report.getLines().toString(), report.hasErrors());
+		assertTrue(report.getLines().toString(), hasLine(report, RestoreReport.WARNING, sinBase.getPath() + " no tiene base de certificados (cert9.db)")); //$NON-NLS-1$
+		assertFalse(report.getLines().toString(), hasLine(report, RestoreReport.WARNING, conBase.getPath()));
+		assertFalse(new File(sinBase, "cert9.db").exists()); //$NON-NLS-1$
+		assertTrue(new File(sinBase, "user.js").isFile()); //$NON-NLS-1$
+		assertTrue(new File(sinBase, "handlers.json").isFile()); //$NON-NLS-1$
+		assertCaInstalled(conBase);
+	}
+
 	/** Una base con contrase&ntilde;a maestra se salta con un aviso y sin colgarse; las dem&aacute;s se restauran.
 	 * @throws Exception En cualquier error. */
 	@Test(timeout = 60000)

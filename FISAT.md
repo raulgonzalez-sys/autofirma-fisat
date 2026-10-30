@@ -146,7 +146,10 @@ Clases que ejecuta el job `pruebas` (`-Dtest` del workflow). JUnit 4, nombre
   del paquete oficial hace `pkill firefox`.
 - No hay paso por usuario al arrancar: el lanzador solo ajusta el locale y
   ejecuta `java`. La configuración de cada usuario la hace `autofirma
-  restaurar` (ver «Restaurar instalación»).
+  restaurar` (ver «Restaurar instalación»). Con `restaurar` como primer
+  argumento el lanzador ejecuta directamente `RestoreCommandLinux` (`-cp`, no
+  `-jar`): la clase de la aplicación instala el registro en `~/.afirma` al
+  cargarse y `--usuario` no debe escribir ahí.
 
 ### Restaurar instalación
 
@@ -160,15 +163,16 @@ Clases que ejecuta el job `pruebas` (`-Dtest` del workflow). JUnit 4, nombre
   permisos:
   - `autofirma restaurar --sistema` (root): CA y almacén SSL si faltan,
     `AutoFirma.js`, extensión CSP en `policies.json` de Firefox, `/etc/skel` y
-    el home de cada usuario (con `runuser`). `postinst` la ejecuta en cada
-    instalación o actualización.
+    el home de cada usuario (con `runuser`, como su dueño; un home cuyo
+    directorio es de root o de una cuenta de sistema, UID < 1000, se salta con
+    aviso). `postinst` la ejecuta en cada instalación o actualización.
   - `autofirma restaurar --usuario`: solo bases NSS, `user.js` y
     `handlers.json` del usuario. Nunca genera certificados.
   - `autofirma restaurar --quitar-politicas` (root): quita la extensión CSP.
     `prerm` la ejecuta solo en `remove` o `deconfigure`, nunca al actualizar.
 - Con un perfil de Firefox abierto no se escribe `handlers.json` (Firefox lo
   pisaría al cerrar) y se avisa; con contraseña maestra la base se salta con
-  aviso.
+  aviso; un perfil sin `cert9.db` no recibe la CA y se avisa.
 
 ### Lectura de certificados: Firefox y Chrome
 
@@ -200,11 +204,11 @@ conocidos, sin probar:
 
 ### Chrome y AutoFirma desde la web
 
-- Almacén de Chrome: `~/.pki/nssdb` si existe; si no, `~/.local/share/pki/nssdb` (ruta literal). `restaurar` instala la CA en los dos.
-- Chrome solo lee la CA al arrancar. Tras instalar o actualizar el paquete (la CA se regenera en cada actualización) hay que reiniciar Chrome o cerrar la sesión: probado, Chrome no acepta en caliente una CA añadida a su almacén abierto. `postinst` lo avisa.
+- Almacén de Chrome: `~/.pki/nssdb` si existe; si no, `~/.local/share/pki/nssdb` (ruta literal). `restaurar` instala la CA solo en ese, el que usa Chrome.
+- Chrome solo lee la CA al arrancar. Tras la primera instalación del paquete (o cuando falta `autofirma.pfx` y la CA se genera de nuevo) hay que reiniciar Chrome o cerrar la sesión: probado, Chrome no acepta en caliente una CA añadida a su almacén abierto. `postinst` lo avisa. Las actualizaciones conservan `autofirma.pfx` y la CA.
 - Política `/etc/opt/chrome/policies/managed/autofirma-fisat.json` (`AutoLaunchProtocolsFromOrigins`, protocolo `afirma`, `allowed_origins: ["*"]`): Chrome lanza `afirma://` sin preguntar y cualquier origen puede hacerlo. Comprobar en `chrome://policy`. Chromium no está incluido.
 - Ciclo de vida de AutoFirma lanzado desde la web: vive mientras la pestaña mantiene abierto el websocket. Se cierra al cerrar la pestaña o Chrome (código 1001), al cortarse la conexión o suspender el equipo (1006), o a los 30 s si nunca llega a conectarse. No es un fallo.
-- Desinstalación: `prerm` solo ejecuta `autofirma restaurar --quitar-politicas` (quita la extensión CSP de `policies.json`) y borra los ficheros del sistema (certificados y enlace de `firefox-esr`). La CA `SocketAutoFirma` de los almacenes NSS de cada usuario no se retira: no hay paso por usuario en la retirada. Los certificados personales y sus claves no se tocan.
+- Desinstalación: solo en `remove` o `deconfigure` (nunca al actualizar), `prerm` ejecuta `autofirma restaurar --quitar-politicas` (quita la extensión CSP de `policies.json`) y borra los ficheros del sistema (`autofirma.pfx`, la CA y su copia en el almacén del sistema, y el enlace de `firefox-esr`). La CA `SocketAutoFirma` de los almacenes NSS de cada usuario no se retira: no hay paso por usuario en la retirada. Los certificados personales y sus claves no se tocan.
 
 ### Diálogos de ficheros (Linux)
 

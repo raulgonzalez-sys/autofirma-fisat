@@ -48,6 +48,26 @@ chk L2_sin_paso_usuario no "$([ -e "$T/marca" ] && echo si || echo no)"
 # L3: el texto del lanzador no menciona el paso por usuario ni su timeout
 chk L3_sin_fisat_usuario 0 "$(grep -c 'fisat-usuario\|AUTOFIRMA_FISAT_USUARIO\|AUTOFIRMA_FISAT_TIMEOUT\|timeout' "$L" || true)"
 
+# L4: restaurar va a RestoreCommandLinux con -cp (sin -jar, que cargaría SimpleAfirma) y conserva sus argumentos
+opciones=$(sed -n '1,6p' <<<"$esperado")
+esperado_restaurar=$(printf '%s\n' "$opciones" \
+	-cp /usr/lib/Autofirma/autofirma.jar \
+	es.gob.afirma.standalone.ui.restoreconfig.linux.RestoreCommandLinux \
+	restaurar --usuario)
+rm -f "$T/salida"
+AF_SALIDA=$T/salida PATH="$T/bin:$PATH" "$L" restaurar --usuario >"$T/stdout" 2>&1 </dev/null || true
+chk L4_restaurar_directo "$esperado_restaurar" "$(cat "$T/salida" 2>/dev/null || true)"
+
+# L5: solo el primer argumento cuenta: una URL que contiene restaurar sigue yendo a la aplicación con -jar
+rm -f "$T/salida"
+AF_SALIDA=$T/salida PATH="$T/bin:$PATH" "$L" 'afirma://restaurar' >"$T/stdout" 2>&1 </dev/null || true
+chk L5_restaurar_no_primero "-jar" "$(grep -x -- '-jar' "$T/salida" 2>/dev/null || true)"
+
+# L6: restaurar también ajusta el locale (bajo pkexec no hay LANG)
+rm -f "$T/salida" "$T/salida.env"
+AF_SALIDA=$T/salida PATH="$T/bin:$PATH" env -u LANG -u LC_ALL -u LC_CTYPE "$L" restaurar --sistema >"$T/stdout" 2>&1 </dev/null || true
+chk L6_restaurar_locale C.UTF-8 "$(grep '^LC_CTYPE=' "$T/salida.env" 2>/dev/null | cut -d= -f2- || true)"
+
 # lanzar_env <env...>: ejecuta el lanzador con el entorno que da env (java vuelca su locale en salida.env)
 lanzar_env() {
 	rm -f "$T/salida" "$T/salida.env"
