@@ -178,6 +178,16 @@ chk_politicas() {
 	grep -q -- '--delete-if-empty' <<<"$dentro" || { echo "prerm llama a remove sin --delete-if-empty: $dentro"; return 1; }
 }
 
+# fisat-retirar.sh se llama desde prerm solo dentro de remove|deconfigure (nunca en upgrade) y no desde postrm
+chk_retirar() {
+	local fuera dentro
+	fuera=$(awk '/^[[:space:]]*remove\|deconfigure\)/ {d=1} d==0 && /fisat-retirar\.sh/ {print} /;;/ {d=0}' "$X/DEBIAN/prerm")
+	dentro=$(awk '/^[[:space:]]*remove\|deconfigure\)/ {d=1} d==1 && /fisat-retirar\.sh/ {print} /;;/ {d=0}' "$X/DEBIAN/prerm")
+	[ -n "$dentro" ] || { echo "prerm no llama a fisat-retirar.sh dentro de remove|deconfigure"; return 1; }
+	[ -z "$fuera" ] || { echo "prerm llama a fisat-retirar.sh fuera de remove|deconfigure: $fuera"; return 1; }
+	! grep -q 'fisat-retirar\.sh' "$X/DEBIAN/postrm" || { echo "postrm llama a fisat-retirar.sh: dpkg ya lo ha borrado en ese momento, debe ir en prerm"; return 1; }
+}
+
 # El lanzador del paquete arranca con exec java y pasa antes por fisat-usuario.sh
 chk_lanzador() {
 	local f=$X/usr/bin/autofirma
@@ -195,10 +205,10 @@ chk_autostart() {
 	[ -z "$salida" ] || { echo "$salida"; return 1; }
 }
 
-# Paso por usuario y ayudante de políticas con modo 755
+# Paso por usuario, retirada y ayudante de políticas con modo 755
 chk_usuario() {
 	local f perm malos=""
-	for f in fisat-usuario.sh fisat-politicas.py; do
+	for f in fisat-usuario.sh fisat-retirar.sh fisat-politicas.py; do
 		perm=$(listado | awk -v n="./usr/lib/Autofirma/$f" '$3 == n {print $1}')
 		[ "$perm" = "-rwxr-xr-x" ] || malos="$malos $f('$perm')"
 	done
