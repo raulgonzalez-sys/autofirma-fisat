@@ -25,6 +25,17 @@ PASSWD
 # --- candidatos: reglas de passwd ---
 chk candidatos_passwd "$(printf 'ana\t%s/home/ana' "$T")" "$(fn candidatos "$T/vacio" <"$T/passwd")"
 
+# --- candidatos: filtro de uid con homes válidos (contienen home/ y existen) ---
+mkdir -p "$T/uid/home"/{rooty,sys999,nob,limite,alto}
+cat >"$T/passwd-uid" <<PASSWD
+rooty:x:0:0::$T/uid/home/rooty:/bin/bash
+sys999:x:999:999::$T/uid/home/sys999:/bin/bash
+nob:x:65534:65534::$T/uid/home/nob:/bin/bash
+limite:x:1000:1000::$T/uid/home/limite:/bin/bash
+alto:x:60000:60000::$T/uid/home/alto:/bin/bash
+PASSWD
+chk candidatos_passwd_uid "$(printf 'limite\t%s/uid/home/limite\nalto\t%s/uid/home/alto' "$T" "$T")" "$(fn candidatos "$T/vacio" <"$T/passwd-uid")"
+
 # --- candidatos: directorios de la base ---
 mkdir -p "$T/home/pepe"
 ln -s pepe "$T/home/alias"
@@ -35,6 +46,26 @@ else
 	echo "OK candidatos_base (omitido: uid < 1000)"
 	PASA=$((PASA + 1))
 fi
+
+# --- candidatos: propietario de <base>/* con un stat falso (sin root no hay chown) ---
+mkdir -p "$T/fbase/home"/{sys500,nobodyd,desconocido,bueno,limite}
+mkdir -p "$T/bin-stat"
+cat >"$T/bin-stat/stat" <<SHIM
+#!/bin/bash
+# uso del script: stat -c <formato> -- <ruta>; solo se falsean los directorios de prueba
+case "\${4##*/}" in
+	sys500) u=500 n=daemon ;;
+	nobodyd) u=65534 n=nobody ;;
+	desconocido) u=1700 n=UNKNOWN ;;
+	bueno) u=1700 n=bueno ;;
+	limite) u=1000 n=limite ;;
+	*) exec $(command -v stat) "\$@" ;;
+esac
+[ "\$2" = %u ] && echo "\$u" || echo "\$n"
+SHIM
+chmod +x "$T/bin-stat/stat"
+esperado=$(printf 'bueno\t%s/fbase/home/bueno\nlimite\t%s/fbase/home/limite' "$T" "$T")
+chk candidatos_base_propietario "$esperado" "$(PATH=$T/bin-stat:$PATH fn candidatos "$T/fbase/home" </dev/null)"
 
 # --- leer_passwd: getent y respaldo ---
 mkdir -p "$T/bin-falla" "$T/bin-fake"
