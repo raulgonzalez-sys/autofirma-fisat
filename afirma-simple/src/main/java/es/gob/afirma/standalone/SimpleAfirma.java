@@ -94,6 +94,7 @@ import es.gob.afirma.standalone.ui.SignOperationConfig;
 import es.gob.afirma.standalone.ui.SignPanel;
 import es.gob.afirma.standalone.ui.SignResultListPanel;
 import es.gob.afirma.standalone.ui.SignatureResultViewer;
+import es.gob.afirma.standalone.ui.restoreconfig.linux.RestoreCommandLinux;
 import es.gob.afirma.standalone.ui.tasks.CheckTrustKeyStoreTask;
 import es.gob.afirma.standalone.ui.tasks.SSLContextConfigurationTask;
 import es.gob.afirma.standalone.updater.Updater;
@@ -842,6 +843,12 @@ public final class SimpleAfirma implements PropertyChangeListener, WindowListene
 	 * @param args Par&aacute;metros en l&iacute;nea de comandos
 	 */
     public static void main(final String[] args) {
+
+    	// Orden "restaurar" de Linux: sin interfaz, sin dialogo de progreso y con su propio codigo de salida
+    	if (args != null && args.length > 0 && "restaurar".equals(args[0])) { //$NON-NLS-1$
+    		RestoreCommandLinux.main(args);
+    		return;
+    	}
 
     	// Configuramos el log de la aplicacion
     	configureLog();

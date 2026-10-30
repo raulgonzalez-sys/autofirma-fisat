@@ -153,6 +153,8 @@ public final class RestoreConfigPanel extends JPanel implements KeyListener, Dis
 			ae -> disposeInterface()
 		);
 
+		// En Linux hay dos restauraciones, con sus propios botones
+		final boolean linux = Platform.OS.LINUX.equals(Platform.getOS());
 		final JButton restoreButton = new JButton(SimpleAfirmaMessages.getString("RestoreConfigPanel.1")); //$NON-NLS-1$
 		restoreButton.setMnemonic('R');
 		restoreButton.getAccessibleContext().setAccessibleDescription(
@@ -172,8 +174,12 @@ public final class RestoreConfigPanel extends JPanel implements KeyListener, Dis
 
 		});
 
+		if (linux) {
+			RestoreConfigPanelLinux.addButtons(panel, this, this);
+			panel.add(closeButton);
+		}
 		// En Mac OS X el orden de los botones es distinto
-		if (Platform.OS.MACOSX.equals(Platform.getOS())) {
+		else if (Platform.OS.MACOSX.equals(Platform.getOS())) {
 			panel.add(closeButton);
 			panel.add(restoreButton);
 		}
