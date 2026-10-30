@@ -138,6 +138,12 @@ Clases que ejecuta el job `pruebas` (`-Dtest` del workflow). JUnit 4, nombre
   y se diagnostica con `/usr/lib/Autofirma/fisat-usuario.sh --check` (sale 0
   si está todo bien, 1 si hay algo pendiente, 2 si hay error).
 
+### Raíz de Firefox en Linux
+
+- Firefox elige la raíz tradicional (`~/.mozilla/firefox`) si ya existe y usa la XDG (`~/.config/mozilla/firefox`) solo en su ausencia: `nsXREDirProvider::GetLegacyOrXDGHomePath` llama a `LegacyHomeExists`, que solo mira las rutas tradicionales, y cae a XDG si no están. Fuente: https://github.com/mozilla-firefox/firefox/blob/main/toolkit/xre/nsXREDirProvider.cpp (leído el 2026-10-30).
+- Regla del fork (`NssLinuxDatabases.firefoxRoot`): `~/.mozilla/firefox` si contiene `profiles.ini`; si no, `~/.config/mozilla/firefox`; Snap (`~/snap/firefox/common/.mozilla/firefox`) al final. Difiere de Firefox en un caso marginal: Firefox decide por la existencia del directorio tradicional y el fork por la del `profiles.ini`, para no quedarse con una raíz vacía.
+- `findDatabases` devuelve el perfil activo de Firefox y la base de Chrome, solo con `cert9.db` y sin repetidas por ruta real, Firefox primero. Usuario sin base de Chrome: solo Firefox.
+
 ### Chrome y AutoFirma desde la web
 
 - Almacén de Chrome: `~/.pki/nssdb` si existe; si no, `${XDG_DATA_HOME:-~/.local/share}/pki/nssdb`. El paso por usuario instala la CA en los dos.

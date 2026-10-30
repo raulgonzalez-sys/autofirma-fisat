@@ -38,6 +38,7 @@ import es.gob.afirma.core.misc.LoggerUtil;
 import es.gob.afirma.core.misc.Platform;
 import es.gob.afirma.keystores.KeyStoreErrorCode;
 import es.gob.afirma.keystores.mozilla.AOSecMod.ModuleName;
+import es.gob.afirma.keystores.mozilla.linux.NssLinuxDatabases;
 import es.gob.afirma.keystores.mozilla.shared.SharedNssUtil;
 
 /** Clase con m&eacute;toos de utilidad para la gesti&oacute;n del almac&eacute;n
@@ -526,14 +527,10 @@ public final class MozillaKeyStoreUtilities {
 		}
 		// Linux / UNIX
 
-		// Directorio en sistemas Ubuntu
-		if (new File(Platform.getUserHome() + "/snap/firefox/common/.mozilla/firefox/profiles.ini").isFile()) { //$NON-NLS-1$
-			return Platform.getUserHome() + "/snap/firefox/common/.mozilla/firefox/profiles.ini"; //$NON-NLS-1$
-		}
-
-		// Directorio de Firefox 147 y superiores
-		if (new File(Platform.getUserHome() + "/.config/mozilla/firefox/profiles.ini").isFile()) { //$NON-NLS-1$
-			return Platform.getUserHome() + "/.config/mozilla/firefox/profiles.ini"; //$NON-NLS-1$
+		// Raiz de Firefox segun la regla unica de NssLinuxDatabases (tradicional, XDG y Snap)
+		final File firefoxRoot = NssLinuxDatabases.firefoxRoot(new File(Platform.getUserHome()));
+		if (firefoxRoot != null) {
+			return new File(firefoxRoot, "profiles.ini").getAbsolutePath(); //$NON-NLS-1$
 		}
 
 		// Directorio por defecto
