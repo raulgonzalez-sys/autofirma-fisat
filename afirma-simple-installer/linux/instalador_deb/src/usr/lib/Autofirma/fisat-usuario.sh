@@ -1,6 +1,6 @@
 #!/bin/bash
 # Paso por usuario de AutoFirma FISAT: certificado raíz en el NSS de cada perfil Mozilla del usuario,
-# ~/.pki/nssdb enlazado al perfil activo y protocolo afirma:// en Firefox (user.js y handlers.json).
+# ~/.pki/nssdb enlazado al perfil activo, almacén NSS XDG de Chrome y afirma:// en Firefox (user.js y handlers.json).
 # Sin set -e: cada fallo se registra y se continúa. Cargable con source para probar sus funciones.
 
 NICK=SocketAutoFirma
@@ -61,12 +61,13 @@ sys.exit(10)
 uso() {
 	cat <<'EOF'
 Uso: fisat-usuario.sh [--quiet|--verbose] [--check] [--help]
-Instala el certificado raíz de AutoFirma en los perfiles Mozilla del usuario,
+Instala el certificado raíz de AutoFirma en los perfiles Mozilla del usuario
+y en el almacén NSS de Chrome ${XDG_DATA_HOME:-~/.local/share}/pki/nssdb si existe,
 enlaza ~/.pki/nssdb al perfil activo y registra afirma:// en Firefox.
   --quiet    sin salida por pantalla
   --verbose  registra también lo que ya estaba bien
   --check    solo comprueba, sin escribir: sale 0 (bien), 1 (pendiente) o 2 (error)
-Entorno: AUTOFIRMA_FISAT_CER, AUTOFIRMA_FISAT_BIN
+Entorno: AUTOFIRMA_FISAT_CER, AUTOFIRMA_FISAT_BIN, XDG_DATA_HOME (solo si es absoluto)
 EOF
 }
 
@@ -132,9 +133,40 @@ nss_estado() {
 	return 1
 }
 
+# nss_xdg: almacén NSS XDG de Chrome (XDG_DATA_HOME solo si es absoluto); no crea nada
+nss_xdg() {
+	if [[ ${XDG_DATA_HOME:-} == /* ]]; then
+		printf '%s\n' "$XDG_DATA_HOME/pki/nssdb"
+	else
+		printf '%s\n' "$HOME/.local/share/pki/nssdb"
+	fi
+}
+
+# nss_borrar <db>: único certutil -D; solo apodos exactos $LEGACY y $NICK, hasta 5 por apodo; 0 ninguna, 10 borradas, 2 error
+nss_borrar() {
+	local db=$1 n i borradas=0
+	NSS_MOTIVO=
+	for n in "$LEGACY" "$NICK"; do
+		for i in 1 2 3 4 5; do
+			[ -n "$(nss_entradas "$db" "$n")" ] || break
+			if ! _nss -D -d "sql:$db" -n "$n" -f /dev/null >/dev/null 2>&1; then
+				NSS_MOTIVO="certutil -D -n '$n' falló (intento $i)"
+				return 2
+			fi
+			borradas=1
+		done
+		if [ -n "$(nss_entradas "$db" "$n")" ]; then
+			NSS_MOTIVO="quedan entradas '$n' tras 5 borrados"
+			return 2
+		fi
+	done
+	[ "$borradas" = 1 ] && return 10
+	return 0
+}
+
 # nss_sync <db> <cer>: 0 sin cambios, 10 cambiado, 2 error u omitido (motivo en NSS_MOTIVO)
 nss_sync() {
-	local db=$1 cer=$2 n i
+	local db=$1 cer=$2 r
 	NSS_MOTIVO=
 	[ -f "$db/cert9.db" ] || return 0
 	if nss_contrasena "$db"; then
@@ -143,15 +175,9 @@ nss_sync() {
 	fi
 	nss_correcto "$db" "$cer" && return 0
 	# Fuera el apodo antiguo y cualquier SocketAutoFirma que no valga (puede haber varios con el mismo apodo)
-	for n in "$LEGACY" "$NICK"; do
-		for i in 1 2 3 4 5; do
-			[ -n "$(nss_entradas "$db" "$n")" ] || break
-			if ! _nss -D -d "sql:$db" -n "$n" -f /dev/null >/dev/null 2>&1; then
-				NSS_MOTIVO="certutil -D -n '$n' falló (intento $i)"
-				return 2
-			fi
-		done
-	done
+	nss_borrar "$db"
+	r=$?
+	[ "$r" = 2 ] && return 2
 	if ! _nss -A -d "sql:$db" -n "$NICK" -t "C,," -f /dev/null -i "$cer" >/dev/null 2>&1; then
 		NSS_MOTIVO="certutil -A falló"
 		return 2
@@ -461,14 +487,18 @@ anota() {
 	return 0
 }
 
-# sincronizar: certificados, ~/.pki/nssdb y afirma:// en Firefox; en --check devuelve el peor resultado
+# sincronizar: certificados, ~/.pki/nssdb, almacén XDG y afirma:// en Firefox; en --check devuelve el peor resultado
 sincronizar() {
-	local db p
+	local db p xdg
 	PEOR=0
 	while IFS= read -r db; do
 		nss_tratar "$db" || anota $?
 	done < <(perfiles_nss)
 	pki_sync "$(perfil_activo)" || anota $?
+	xdg=$(nss_xdg)
+	if [ -f "$xdg/cert9.db" ]; then
+		nss_tratar "$xdg" || anota $?
+	fi
 	while IFS= read -r p; do
 		userjs_sync "$p" || anota $?
 		handlers_sync "$p" || anota $?

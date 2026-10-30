@@ -55,3 +55,10 @@ mk_ini() {
 	mkdir -p "$1"
 	printf '%s\n' "$2" >"$1/profiles.ini"
 }
+
+# mk_personal <db> [apodo]: certificado autofirmado con clave privada (apodo por defecto "Usuario Prueba")
+mk_personal() {
+	local apodo=${2:-Usuario Prueba} ruido=$T/ruido.$RANDOM
+	head -c 64 /dev/urandom >"$ruido"
+	certutil -S -d "sql:$1" -n "$apodo" -s "CN=$apodo" -x -t "u,u,u" -k rsa -g 2048 -z "$ruido" -f /dev/null </dev/null >/dev/null 2>&1
+}

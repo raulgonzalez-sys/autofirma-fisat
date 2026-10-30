@@ -41,11 +41,12 @@ es_dir_real() { if [ -d "$1" ] && [ ! -L "$1" ]; then echo 1; else echo 0; fi; }
 lineas() { grep -cFx -- "$2" "$1" || true; }
 # fn_check <función> <args...>: como fn, en modo --check
 fn_check() { bash -c '. "$1"; shift; MODO_CHECK=1; "$@"' fn "$S" "$@"; }
-# nuevo_caso: HOME, estado y runtime vacíos
+# nuevo_caso: HOME, estado y runtime vacíos; sin XDG_DATA_HOME para no tocar el almacén real de Chrome
 nuevo_caso() {
 	rm -rf "${T:?}/home" "${T:?}/state" "${T:?}/run"
 	mkdir -p "$T/home" "$T/state" "$T/run"
 	export HOME=$T/home XDG_STATE_HOME=$T/state XDG_RUNTIME_DIR=$T/run AUTOFIRMA_FISAT_CER=$T/A.cer
+	unset XDG_DATA_HOME
 }
 # mk_ff <raíz> <perfil...>: profiles.ini con esos perfiles relativos y sus directorios (sin NSS)
 mk_ff() {
@@ -609,5 +610,120 @@ chk U8_cerrado_rc 0 "$(rc "$S" --quiet)"
 chk U8_cerrado_afirma "$AFIRMA" "$(jq -c .schemes.afirma "$P/handlers.json")"
 chk U8_cerrado_userjs 1 "$(lineas "$P/user.js" "$UJ1")"
 chk U8_cerrado_check 0 "$(rc "$S" --check)"
+
+# --- Almacén XDG de Chrome ---
+
+# clave <db> <apodo>: claves privadas de ese apodo exacto
+clave() { certutil -K -d "sql:$1" -f /dev/null 2>/dev/null | APODO=":$2" awk '{ n = ENVIRON["APODO"] } length($0) >= length(n) && substr($0, length($0) - length(n) + 1) == n' | wc -l; }
+# Mismo sujeto que A y B y otro DER: se admiten varios con el mismo apodo
+mk_cer "$T/B2.cer"
+mk_cer "$T/L.cer"
+
+# X1_xdg_recibe_ca: sin Firefox, el almacén XDG recibe la CA y no se crea ~/.pki
+nuevo_caso
+XD=$HOME/.local/share/pki/nssdb
+mk_nss "$XD"
+chk X1_rc 0 "$(rc "$S" --quiet)"
+chk X1_xdg_recibe_ca igual "$(der "$XD" SocketAutoFirma "$T/A.cer")"
+chk X1_flags "C,," "$(confianza "$XD" SocketAutoFirma)"
+chk X1_sin_pki 0 "$(existe "$HOME/.pki")"
+
+# X2_xdg_data_home: con XDG_DATA_HOME absoluto se usa ese y no el de ~/.local/share
+nuevo_caso
+export XDG_DATA_HOME=$T/datos
+mk_nss "$T/datos/pki/nssdb"
+mk_nss "$XD"
+chk X2_rc 0 "$(rc "$S" --quiet)"
+chk X2_xdg_data_home igual "$(der "$T/datos/pki/nssdb" SocketAutoFirma "$T/A.cer")"
+chk X2_local_share_intacto 0 "$(entradas "$XD" SocketAutoFirma)"
+
+# X3_xdg_relativo: un XDG_DATA_HOME relativo se ignora
+nuevo_caso
+export XDG_DATA_HOME=datos
+mk_nss "$XD"
+chk X3_rc 0 "$(rc "$S" --quiet)"
+chk X3_xdg_relativo igual "$(der "$XD" SocketAutoFirma "$T/A.cer")"
+
+# X4_xdg_sin_cert9: un directorio sin almacén no se toca
+nuevo_caso
+mkdir -p "$XD"
+chk X4_rc 0 "$(rc "$S" --quiet)"
+chk X4_xdg_sin_cert9 0 "$(find "$XD" -mindepth 1 | wc -l)"
+
+# X5_xdg_duplicados: varias SocketAutoFirma y el apodo antiguo quedan en una sola CA correcta
+nuevo_caso
+mk_nss "$XD"
+for c in B B2 A; do certutil -A -d "sql:$XD" -n SocketAutoFirma -t "C,," -i "$T/$c.cer"; done
+certutil -A -d "sql:$XD" -n "Autofirma ROOT" -t "CT,C," -i "$T/L.cer"
+chk X5_antes_socket 3 "$(entradas "$XD" SocketAutoFirma)"
+chk X5_antes_antiguo 1 "$(entradas "$XD" "Autofirma ROOT")"
+chk X5_rc 0 "$(rc "$S" --quiet)"
+chk X5_una_entrada 1 "$(entradas "$XD" SocketAutoFirma)"
+chk X5_xdg_duplicados igual "$(der "$XD" SocketAutoFirma "$T/A.cer")"
+chk X5_sin_antiguo 0 "$(entradas "$XD" "Autofirma ROOT")"
+
+# X6_xdg_check: --check informa del almacén XDG pendiente
+nuevo_caso
+mk_nss "$XD"
+chk X6_check_pendiente 1 "$(rc "$S" --check)"
+"$S" --check >"$T/x6.out" || true
+chk X6_xdg_check 1 "$(lineas "$T/x6.out" "pendiente $XD")"
+"$S" --quiet
+chk X6_check_tras_arreglo 0 "$(rc "$S" --check)"
+
+# X7_xdg_enlace_a_perfil: el XDG que apunta al perfil se trata una sola vez
+nuevo_caso
+mk_ff "$HOME/.mozilla/firefox" uno
+mk_nss "$HOME/.mozilla/firefox/uno"
+mkdir -p "${XD%/*}"
+ln -s "$HOME/.mozilla/firefox/uno" "$XD"
+chk X7_rc 0 "$(rc "$S" --quiet)"
+chk X7_xdg_enlace_a_perfil 1 "$(grep -c '\[info\] certificado instalado' "$XDG_STATE_HOME/autofirma-fisat/usuario.log")"
+
+# X8_xdg_contrasena: con contraseña maestra se omite con aviso
+nuevo_caso
+mkdir -p "$XD"
+certutil -N -d "sql:$XD" -f "$T/c7.pw"
+chk X8_rc 0 "$(rc "$S" --quiet)"
+chk X8_no_importado 0 "$(entradas "$XD" SocketAutoFirma)"
+chk X8_xdg_contrasena 1 "$(grep -cF "[aviso] omitido $XD: contraseña maestra" "$XDG_STATE_HOME/autofirma-fisat/usuario.log")"
+
+# X9_invariante_sync: la sincronización solo toca SocketAutoFirma; certificados personales y claves intactos
+nuevo_caso
+mk_nss "$XD"
+mk_personal "$XD"
+mk_personal "$XD" "SocketAutoFirma copia"
+certutil -A -d "sql:$XD" -n SocketAutoFirma2 -t "C,," -i "$T/X.cer"
+for c in B B2; do certutil -A -d "sql:$XD" -n SocketAutoFirma -t "C,," -i "$T/$c.cer"; done
+chk X9_antes_personal 1 "$(entradas "$XD" "Usuario Prueba")"
+chk X9_antes_personal_clave 1 "$(clave "$XD" "Usuario Prueba")"
+chk X9_antes_copia 1 "$(entradas "$XD" "SocketAutoFirma copia")"
+chk X9_antes_copia_clave 1 "$(clave "$XD" "SocketAutoFirma copia")"
+chk X9_antes_socket 2 "$(entradas "$XD" SocketAutoFirma)"
+certutil -L -d "sql:$XD" >"$T/x9.antes.L"
+certutil -K -d "sql:$XD" -f /dev/null >"$T/x9.antes.K" 2>/dev/null
+chk X9_rc 0 "$(rc "$S" --quiet)"
+certutil -L -d "sql:$XD" >"$T/x9.despues.L"
+certutil -K -d "sql:$XD" -f /dev/null >"$T/x9.despues.K" 2>/dev/null
+chk X9_personal 1 "$(entradas "$XD" "Usuario Prueba")"
+chk X9_personal_clave 1 "$(clave "$XD" "Usuario Prueba")"
+chk X9_copia 1 "$(entradas "$XD" "SocketAutoFirma copia")"
+chk X9_copia_clave 1 "$(clave "$XD" "SocketAutoFirma copia")"
+chk X9_prefijo 1 "$(entradas "$XD" SocketAutoFirma2)"
+chk X9_prefijo_intacto igual "$(der "$XD" SocketAutoFirma2 "$T/X.cer")"
+chk X9_socket 1 "$(entradas "$XD" SocketAutoFirma)"
+chk X9_invariante_sync igual "$(der "$XD" SocketAutoFirma "$T/A.cer")"
+chk X9_claves_iguales "$(cat "$T/x9.antes.K")" "$(cat "$T/x9.despues.K")"
+
+# X10_borrar_acotado: con más de 5 duplicados nss_borrar para y devuelve error, sin falso éxito
+mk_nss "$T/x10"
+for i in 1 2 3 4 5 6; do
+	mk_cer "$T/x10.$i.cer"
+	certutil -A -d "sql:$T/x10" -n SocketAutoFirma -t "C,," -i "$T/x10.$i.cer"
+done
+chk X10_antes 6 "$(entradas "$T/x10" SocketAutoFirma)"
+chk X10_rc 2 "$(rc fn nss_borrar "$T/x10")"
+chk X10_queda_una 1 "$(entradas "$T/x10" SocketAutoFirma)"
+chk X10_vacia_rc 0 "$(rc fn nss_borrar "$T/c8")"
 
 fin
