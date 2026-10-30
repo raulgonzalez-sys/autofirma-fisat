@@ -1,10 +1,13 @@
 package es.gob.afirma.standalone.ui.restoreconfig;
 
 import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -44,5 +47,30 @@ public final class RestoreConfigLinuxTest {
 		final File f = new File(PACKAGE_FILE);
 		assertTrue("No existe " + f.getAbsolutePath(), f.isFile()); //$NON-NLS-1$
 		assertArrayEquals(Files.readAllBytes(f.toPath()), readResource());
+	}
+
+	/** Una entrada nula (recurso ausente) debe fallar, no devolver un fichero vacio. */
+	@Test(expected = IOException.class)
+	public void cargaNulaFalla() throws Exception {
+		RestoreConfigLinux.loadProtocolHandlerConfig(null);
+	}
+
+	/** Un recurso de 0 bytes debe fallar. */
+	@Test(expected = IOException.class)
+	public void cargaVaciaFalla() throws Exception {
+		RestoreConfigLinux.loadProtocolHandlerConfig(new ByteArrayInputStream(new byte[0]));
+	}
+
+	/** Un recurso con contenido se devuelve integro. */
+	@Test
+	public void cargaDevuelveContenido() throws Exception {
+		assertArrayEquals(new byte[] { 'x' },
+				RestoreConfigLinux.loadProtocolHandlerConfig(new ByteArrayInputStream("x".getBytes(StandardCharsets.UTF_8)))); //$NON-NLS-1$
+	}
+
+	/** El fichero de destino sustituye al del paquete (mismo nombre, con mayusculas). */
+	@Test
+	public void destinoEsAutoFirmaJs() {
+		assertEquals("AutoFirma.js", RestoreConfigLinux.PROTOCOL_HANDLER_TARGET_FILE); //$NON-NLS-1$
 	}
 }
