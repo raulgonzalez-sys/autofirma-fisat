@@ -44,9 +44,9 @@ final class RestoreConfigLinux implements RestoreConfig {
 
     static final Logger LOGGER = Logger.getLogger("es.gob.afirma"); //$NON-NLS-1$
 
-    private static final String KS_FILENAME = "autofirma.pfx"; //$NON-NLS-1$
-    private static final String FILE_AUTOFIRMA_CERTIFICATE = "Autofirma_ROOT.cer"; //$NON-NLS-1$
-    private static final String KS_PASSWORD = "654321"; //$NON-NLS-1$
+    static final String KS_FILENAME = "autofirma.pfx"; //$NON-NLS-1$
+    static final String FILE_AUTOFIRMA_CERTIFICATE = "Autofirma_ROOT.cer"; //$NON-NLS-1$
+    static final String KS_PASSWORD = "654321"; //$NON-NLS-1$
     static final String PROTOCOL_HANDLER_RESOURCE = "/linux/autofirma.js"; //$NON-NLS-1$
     static final String PROTOCOL_HANDLER_TARGET_FILE = "AutoFirma.js"; //$NON-NLS-1$
     private static final String DEFAULT_PROTOCOL_HANDLER_CONFIG_DIR = "/etc/firefox/pref"; //$NON-NLS-1$

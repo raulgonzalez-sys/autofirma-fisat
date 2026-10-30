@@ -52,11 +52,29 @@ public final class RestoreReport {
 	/** A&ntilde;ade una l&iacute;nea {@code ERROR}.
 	 * @param message Mensaje en castellano. */
 	public void error(final String message) {
-		this.errors = true;
 		add(ERROR + message);
 	}
 
+	/** A&ntilde;ade una l&iacute;nea ya formada, como las que escribe otro proceso de restauraci&oacute;n:
+	 * con prefijo {@code OK}, {@code AVISO} o {@code ERROR} se guarda tal cual; sin prefijo, como
+	 * {@code AVISO}; una l&iacute;nea en blanco se descarta.
+	 * @param rawLine L&iacute;nea recibida. */
+	public void addLine(final String rawLine) {
+		if (rawLine.trim().isEmpty()) {
+			return;
+		}
+		if (rawLine.startsWith(OK) || rawLine.startsWith(WARNING) || rawLine.startsWith(ERROR)) {
+			add(rawLine);
+		}
+		else {
+			warning(rawLine);
+		}
+	}
+
 	private synchronized void add(final String line) {
+		if (line.startsWith(ERROR)) {
+			this.errors = true;
+		}
 		this.lines.add(line);
 		if (this.out != null) {
 			this.out.accept(line);
