@@ -1,7 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Autofirma, preparación por usuario
-Exec=/usr/lib/Autofirma/fisat-usuario.sh --quiet
-Terminal=false
-NoDisplay=true
-X-KDE-autostart-phase=2

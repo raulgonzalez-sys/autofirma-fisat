@@ -1,20 +1,9 @@
 #!/bin/bash
 aviso() { echo "autofirma $0: AVISO: $*" >&2; }
 
-# generamos certificado CA y SSL
-java -jar /usr/lib/Autofirma/autofirmaConfigurador.jar || aviso "el configurador ha fallado"
-# el paso por usuario lee el certificado como usuario
-chmod 644 /usr/lib/Autofirma/Autofirma_ROOT.cer || aviso "no se pudo dar permiso de lectura a Autofirma_ROOT.cer"
-
-# damos permiso al script de instalacion del certificado para firefox y lo ejecutamos
-echo "Generacion de certificados"
-
-if [ -f "/usr/lib/Autofirma/script.sh" ]; then
-	chmod +x /usr/lib/Autofirma/script.sh || aviso "no se pudo dar permiso a script.sh"
-	/usr/lib/Autofirma/script.sh || aviso "script.sh ha fallado"
-fi
-
-echo "Instalacion del certificado CA en el almacenamiento de Firefox y Chrome"
+# Certificado raiz y almacen SSL, AutoFirma.js, extension CSP de Firefox y la parte de cada usuario
+echo "Preparacion de AutoFirma: certificados, Firefox y Chrome"
+/usr/bin/autofirma restaurar --sistema || aviso "la restauracion del sistema ha fallado"
 
 # Creacion de certificado .pem y .crt para su importacion en el almacenamiento del sistema
 openssl x509 -inform der -in /usr/lib/Autofirma/Autofirma_ROOT.cer -out /usr/lib/Autofirma/Autofirma_ROOT.pem || aviso "openssl no pudo convertir Autofirma_ROOT.cer"
@@ -29,27 +18,7 @@ cp /usr/lib/Autofirma/Autofirma_ROOT.crt /usr/local/share/ca-certificates/Autofi
 update-ca-certificates || aviso "update-ca-certificates ha fallado"
 echo "Instalacion del certificado CA en el almacenamiento del sistema"
 
-# Enlazamos el fichero de asociacion del protocolo "afirma" en Firefox
-# para que aplique a otros navegadores
-if [ -d /etc/icecat ] ; then
-	mkdir -p /etc/icecat/pref || aviso "no se pudo crear /etc/icecat/pref"
-	ln -sfn /etc/firefox/pref/AutoFirma.js /etc/icecat/pref/AutoFirma.js || aviso "no se pudo enlazar /etc/icecat/pref/AutoFirma.js"
-fi
-if [ -d /etc/firefox-esr ] ; then
-	mkdir -p /etc/firefox-esr/pref || aviso "no se pudo crear /etc/firefox-esr/pref"
-	ln -sfn /etc/firefox/pref/AutoFirma.js /etc/firefox-esr/pref/AutoFirma.js || aviso "no se pudo enlazar /etc/firefox-esr/pref/AutoFirma.js"
-fi
-
-# Extension CSP de Firefox: fusiona su clave en policies.json sin tocar el resto
-# /etc/firefox/policies lo leen Firefox ESR y el Firefox de Mozilla; el de firefox-esr solo si ya existe
-mkdir -p /etc/firefox/policies || aviso "no se pudo crear /etc/firefox/policies"
-for pj in /etc/firefox/policies/policies.json /etc/firefox-esr/policies/policies.json; do
-	if [ "$pj" = /etc/firefox/policies/policies.json ] || [ -f "$pj" ]; then
-		/usr/lib/Autofirma/fisat-politicas.py add "$pj" autofirma-csp-fix@local /usr/share/Autofirma/autofirma-csp-fix.xpi || aviso "no se pudo registrar la extension CSP en $pj"
-	fi
-done
-
-# borramos los ficheros de instalacion
-rm -f /usr/lib/Autofirma/script.sh /usr/lib/Autofirma/Autofirma_ROOT.crt || aviso "no se pudieron borrar los ficheros de instalacion"
+# borramos el fichero de instalacion
+rm -f /usr/lib/Autofirma/Autofirma_ROOT.crt || aviso "no se pudo borrar Autofirma_ROOT.crt"
 echo "AutoFirma: reinicie Chrome (o cierre la sesión y vuelva a entrar) para que AutoFirma funcione desde la web."
 exit 0

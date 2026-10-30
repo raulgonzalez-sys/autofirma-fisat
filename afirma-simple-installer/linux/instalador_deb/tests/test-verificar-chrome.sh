@@ -8,8 +8,7 @@ DEB=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 NOMBRE=autofirma_1.9.1+fisat0_all.deb
 printf x > "$T/a.jar"
-printf x > "$T/b.jar"
-"$DEB/construir_deb.sh" 1.9.1+fisat0 "$T/out" "$T/a.jar" "$T/b.jar" >/dev/null 2>&1
+"$DEB/construir_deb.sh" 1.9.1+fisat0 "$T/out" "$T/a.jar" >/dev/null 2>&1
 
 # mutar <caso> <orden...>: copia del .deb con la orden ejecutada en su raiz (rutas relativas)
 mutar() {
