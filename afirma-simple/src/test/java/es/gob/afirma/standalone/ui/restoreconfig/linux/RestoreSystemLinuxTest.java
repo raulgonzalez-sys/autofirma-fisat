@@ -17,7 +17,9 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import org.json.JSONObject;
@@ -217,12 +219,12 @@ public final class RestoreSystemLinuxTest {
 
 	private static int restoreWithCommand(final File command, final File app, final File etc, final List<File> homes,
 			final RestoreReport report, final RestoreSystemLinux.UidReader uids) {
-		System.setProperty(RestoreSystemLinux.USER_COMMAND_PROPERTY, command.getPath());
+		RestoreSystemLinux.testUserCommand = command.getPath();
 		try {
 			return RestoreSystemLinux.restore(app, etc, homes, report, uids);
 		}
 		finally {
-			System.clearProperty(RestoreSystemLinux.USER_COMMAND_PROPERTY);
+			RestoreSystemLinux.testUserCommand = null;
 		}
 	}
 
@@ -266,8 +268,8 @@ public final class RestoreSystemLinuxTest {
 		assertTrue(new File(good, "restaurado-por-" + System.getProperty("user.name")).isFile()); //$NON-NLS-1$ //$NON-NLS-2$
 	}
 
-	/** Homes de {@code passwd} con UID &ge; 1000 que existen y directorios de la ra&iacute;z de homes,
-	 * sin repetir la misma ruta real.
+	/** Homes de {@code passwd} con UID &ge; 1000 que existen y directorios de la ra&iacute;z de homes con
+	 * due&ntilde;o de UID &ge; 1000 que no salen de ella, sin repetir la misma ruta real.
 	 * @throws Exception En cualquier error. */
 	@Test
 	public void homesDelSistema() throws Exception {
@@ -276,10 +278,22 @@ public final class RestoreSystemLinuxTest {
 		final File b = new File(homeRoot, "b"); //$NON-NLS-1$
 		assertTrue(a.mkdir() && b.mkdir());
 		assertTrue(new File(homeRoot, "fichero").createNewFile()); //$NON-NLS-1$
+		assertTrue(new File(homeRoot, "lost+found").mkdir()); //$NON-NLS-1$
+		assertTrue(new File(homeRoot, "servicio").mkdir()); //$NON-NLS-1$
 		final File sys = this.tmp.newFolder("sistema"); //$NON-NLS-1$
 		final File other = this.tmp.newFolder("otro"); //$NON-NLS-1$
 		final File link = new File(this.tmp.getRoot(), "enlace"); //$NON-NLS-1$
 		Files.createSymbolicLink(link.toPath(), a.toPath());
+		Files.createSymbolicLink(new File(homeRoot, "fuera").toPath(), other.toPath()); //$NON-NLS-1$
+		Files.createSymbolicLink(new File(homeRoot, "dentro").toPath(), b.toPath()); //$NON-NLS-1$
+		final Map<String, Integer> owners = new HashMap<>();
+		owners.put("a", Integer.valueOf(1000)); //$NON-NLS-1$
+		owners.put("b", Integer.valueOf(1001)); //$NON-NLS-1$
+		owners.put("dentro", Integer.valueOf(1001)); //$NON-NLS-1$
+		owners.put("fuera", Integer.valueOf(1003)); //$NON-NLS-1$
+		owners.put("lost+found", Integer.valueOf(0)); //$NON-NLS-1$
+		owners.put("servicio", Integer.valueOf(999)); //$NON-NLS-1$
+		final RestoreSystemLinux.UidReader uids = p -> owners.get(p.getFileName().toString()).intValue();
 		final List<String> passwd = Arrays.asList(
 				"root:x:0:0:root:/root:/bin/bash", //$NON-NLS-1$
 				"sys:x:999:999::" + sys + ":/usr/sbin/nologin", //$NON-NLS-1$ //$NON-NLS-2$
@@ -287,7 +301,37 @@ public final class RestoreSystemLinuxTest {
 				"ana:x:1000:1000:Ana:" + link + ":/bin/bash", //$NON-NLS-1$ //$NON-NLS-2$
 				"nadie:x:1002:1002::" + new File(this.tmp.getRoot(), "no-existe") + ":/bin/bash", //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
 				"roto"); //$NON-NLS-1$
-		assertEquals(Arrays.asList(other, link, b), RestoreSystemLinux.systemHomes(passwd, homeRoot));
+		assertEquals(Arrays.asList(other, link, b), RestoreSystemLinux.systemHomes(passwd, homeRoot, uids));
+	}
+
+	/** El comando por home lleva {@code timeout} dentro de {@code runuser} y {@code HOME} del home.
+	 * @throws Exception En cualquier error. */
+	@Test
+	public void comandoPorHome() throws Exception {
+		assertEquals(Arrays.asList("/usr/sbin/runuser", "-u", "ana", "--", //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+				"/usr/bin/timeout", "-k", "5", "55", //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+				"/usr/bin/env", "HOME=/home/ana", //$NON-NLS-1$ //$NON-NLS-2$
+				"/usr/bin/autofirma", "restaurar", "--usuario"), //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+				RestoreSystemLinux.userCommand("ana", new File("/home/ana"))); //$NON-NLS-1$ //$NON-NLS-2$
+	}
+
+	/** El subproceso no hereda el entorno de root: solo {@code HOME}, {@code PATH} y la configuraci&oacute;n regional.
+	 * @throws Exception En cualquier error. */
+	@Test
+	public void entornoPorHome() throws Exception {
+		final Map<String, String> env = new HashMap<>();
+		env.put("SSH_AUTH_SOCK", "/run/root/agent"); //$NON-NLS-1$ //$NON-NLS-2$
+		env.put("PATH", "/root/bin:/usr/bin"); //$NON-NLS-1$ //$NON-NLS-2$
+		RestoreSystemLinux.userEnvironment(env, new File("/home/ana"), null, ""); //$NON-NLS-1$ //$NON-NLS-2$
+		final Map<String, String> expected = new HashMap<>();
+		expected.put("HOME", "/home/ana"); //$NON-NLS-1$ //$NON-NLS-2$
+		expected.put("PATH", "/usr/sbin:/usr/bin:/sbin:/bin"); //$NON-NLS-1$ //$NON-NLS-2$
+		expected.put("LANG", "C.UTF-8"); //$NON-NLS-1$ //$NON-NLS-2$
+		expected.put("LC_ALL", "C.UTF-8"); //$NON-NLS-1$ //$NON-NLS-2$
+		assertEquals(expected, env);
+		RestoreSystemLinux.userEnvironment(env, new File("/home/ana"), "es_ES.UTF-8", "es_ES.UTF-8"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+		assertEquals("es_ES.UTF-8", env.get("LANG")); //$NON-NLS-1$ //$NON-NLS-2$
+		assertEquals("es_ES.UTF-8", env.get("LC_ALL")); //$NON-NLS-1$ //$NON-NLS-2$
 	}
 
 	/** Las l&iacute;neas reenviadas recuperan su tipo por el prefijo; sin prefijo son AVISO.

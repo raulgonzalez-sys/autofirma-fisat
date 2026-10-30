@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -36,9 +37,11 @@ import es.gob.afirma.standalone.ui.restoreconfig.RestoreConfigLinuxHooks;
  * {@code /etc/skel} (en este proceso) y de cada home (en un subproceso con la identidad de su due&ntilde;o). */
 public final class RestoreSystemLinux {
 
-	/** Propiedad del sistema con un ejecutable que sustituye al subproceso por usuario (pruebas): recibe
-	 * el nombre del due&ntilde;o como &uacute;nico argumento y el home en {@code HOME}. */
-	public static final String USER_COMMAND_PROPERTY = "es.gob.afirma.fisat.restaurarUsuario"; //$NON-NLS-1$
+	/** Ejecutable que sustituye al subproceso por usuario en las pruebas (recibe el nombre del
+	 * due&ntilde;o como &uacute;nico argumento y el home en {@code HOME}); nulo en producci&oacute;n.
+	 * Es un campo y no una propiedad del sistema para que nada externo pueda cambiar lo que se
+	 * ejecuta como root. */
+	static volatile String testUserCommand = null;
 
 	/** Identificador de la extensi&oacute;n CSP de Firefox. */
 	public static final String EXTENSION_ID = "autofirma-csp-fix@local"; //$NON-NLS-1$
@@ -48,6 +51,9 @@ public final class RestoreSystemLinux {
 
 	private static final String RUNUSER = "/usr/sbin/runuser"; //$NON-NLS-1$
 	private static final String ENV = "/usr/bin/env"; //$NON-NLS-1$
+	private static final String TIMEOUT = "/usr/bin/timeout"; //$NON-NLS-1$
+	private static final String SAFE_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"; //$NON-NLS-1$
+	private static final String DEFAULT_LOCALE = "C.UTF-8"; //$NON-NLS-1$
 	private static final String GETENT = "/usr/bin/getent"; //$NON-NLS-1$
 	private static final String HOME_ROOT = "/home"; //$NON-NLS-1$
 	private static final String DEV_NULL = "/dev/null"; //$NON-NLS-1$
@@ -56,8 +62,13 @@ public final class RestoreSystemLinux {
 	/** Primer UID de las cuentas de persona en Debian. */
 	private static final int FIRST_USER_UID = 1000;
 
-	/** Tiempo m&aacute;ximo de la parte de usuario de un home, para que uno bloqueado no detenga al resto. */
+	/** Tiempo m&aacute;ximo de la parte de usuario de un home, para que uno bloqueado no detenga al resto;
+	 * es la &uacute;ltima defensa: {@code timeout} dentro de {@code runuser} acota antes todo el &aacute;rbol. */
 	private static final long HOME_TIMEOUT_SECONDS = 60;
+
+	/** {@code timeout} dentro de {@code runuser}: TERM a los 55 s y KILL 5 s despu&eacute;s, antes del l&iacute;mite exterior. */
+	private static final String INNER_TIMEOUT_SECONDS = "55"; //$NON-NLS-1$
+	private static final String INNER_KILL_AFTER_SECONDS = "5"; //$NON-NLS-1$
 
 	/** Tiempo m&aacute;ximo de {@code getent}. */
 	private static final long GETENT_TIMEOUT_SECONDS = 10;
@@ -127,9 +138,14 @@ public final class RestoreSystemLinux {
 				report.ok("Certificado raíz " + cer + " extraído de " + pfx); //$NON-NLS-1$ //$NON-NLS-2$
 			}
 			else {
-				// La parte de usuario lee la CA con la identidad de cada usuario
-				Files.setPosixFilePermissions(cer.toPath(), PosixFilePermissions.fromString(PUBLIC_FILE));
 				report.ok("Certificado raíz y almacén SSL sin cambios en " + appDir); //$NON-NLS-1$
+				// La parte de usuario lee la CA con la identidad de cada usuario
+				try {
+					Files.setPosixFilePermissions(cer.toPath(), PosixFilePermissions.fromString(PUBLIC_FILE));
+				}
+				catch (final IOException | RuntimeException e) {
+					report.warning("No se ha podido dar permiso de lectura a " + cer + ": " + e); //$NON-NLS-1$ //$NON-NLS-2$
+				}
 			}
 			return cer;
 		}
@@ -235,26 +251,43 @@ public final class RestoreSystemLinux {
 			return;
 		}
 
-		final List<String> cmd = new ArrayList<>();
-		final String override = System.getProperty(USER_COMMAND_PROPERTY);
-		if (override != null && !override.isEmpty()) {
-			cmd.add(override);
-			cmd.add(owner);
-		}
-		else {
-			// runuser fija HOME al de passwd: env lo vuelve a poner al home que se restaura
-			cmd.addAll(Arrays.asList(RUNUSER, "-u", owner, "--", ENV, "HOME=" + home.getAbsolutePath(), //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
-					RestoreUserLinux.LAUNCHER, "restaurar", "--usuario")); //$NON-NLS-1$ //$NON-NLS-2$
-		}
-		runUserRestore(cmd, home, report);
+		final String test = testUserCommand;
+		runUserRestore(test != null ? Arrays.asList(test, owner) : userCommand(owner, home), home, report);
+	}
+
+	/** Comando de la parte de usuario de un home con la identidad de su due&ntilde;o. {@code timeout} va
+	 * dentro de {@code runuser} para que alcance al lanzador, a la JVM y a {@code certutil}; {@code env}
+	 * vuelve a poner {@code HOME} al home que se restaura, porque {@code runuser} lo fija al de passwd.
+	 * @param owner Nombre del due&ntilde;o.
+	 * @param home Home que se restaura.
+	 * @return Argumentos del comando. */
+	static List<String> userCommand(final String owner, final File home) {
+		return Arrays.asList(RUNUSER, "-u", owner, "--", //$NON-NLS-1$ //$NON-NLS-2$
+				TIMEOUT, "-k", INNER_KILL_AFTER_SECONDS, INNER_TIMEOUT_SECONDS, //$NON-NLS-1$
+				ENV, "HOME=" + home.getAbsolutePath(), //$NON-NLS-1$
+				RestoreUserLinux.LAUNCHER, "restaurar", "--usuario"); //$NON-NLS-1$ //$NON-NLS-2$
+	}
+
+	/** Entorno m&iacute;nimo del subproceso: nada del entorno de root salvo la configuraci&oacute;n regional.
+	 * @param env Entorno del {@link ProcessBuilder}, que se vac&iacute;a.
+	 * @param home Home que se restaura.
+	 * @param lang {@code LANG} de este proceso (puede ser nulo).
+	 * @param lcAll {@code LC_ALL} de este proceso (puede ser nulo). */
+	static void userEnvironment(final Map<String, String> env, final File home, final String lang, final String lcAll) {
+		env.clear();
+		env.put("HOME", home.getAbsolutePath()); //$NON-NLS-1$
+		env.put("PATH", SAFE_PATH); //$NON-NLS-1$
+		env.put("LANG", lang == null || lang.isEmpty() ? DEFAULT_LOCALE : lang); //$NON-NLS-1$
+		env.put("LC_ALL", lcAll == null || lcAll.isEmpty() ? DEFAULT_LOCALE : lcAll); //$NON-NLS-1$
 	}
 
 	/** Ejecuta la parte de usuario de un home reenviando cada l&iacute;nea de su salida al informe. */
 	private static void runUserRestore(final List<String> cmd, final File home, final RestoreReport report) {
 		final ProcessBuilder pb = new ProcessBuilder(cmd)
-			.directory(home)
+			// "/" y no el home: root puede no tener acceso a un home NFS con root_squash
+			.directory(new File("/")) //$NON-NLS-1$
 			.redirectInput(ProcessBuilder.Redirect.from(new File(DEV_NULL)));
-		pb.environment().put("HOME", home.getAbsolutePath()); //$NON-NLS-1$
+		userEnvironment(pb.environment(), home, System.getenv("LANG"), System.getenv("LC_ALL")); //$NON-NLS-1$ //$NON-NLS-2$
 		final Process p;
 		try {
 			p = pb.start();
@@ -306,13 +339,15 @@ public final class RestoreSystemLinux {
 	}
 
 	/** Homes de usuario del sistema: los de {@code getent passwd} con UID &ge; 1000 que existen y los
-	 * directorios de {@code /home}, sin repetir la misma ruta real.
+	 * directorios de {@code /home} con due&ntilde;o de UID &ge; 1000 que no salen de {@code /home}
+	 * (fuera quedan {@code lost+found} y los directorios de root o de cuentas de sistema), sin repetir
+	 * la misma ruta real.
 	 * @return Homes en ese orden. */
 	public static List<File> systemHomes() {
-		return systemHomes(getent("passwd"), new File(HOME_ROOT)); //$NON-NLS-1$
+		return systemHomes(getent("passwd"), new File(HOME_ROOT), UidReader.FILES); //$NON-NLS-1$
 	}
 
-	static List<File> systemHomes(final List<String> passwd, final File homeRoot) {
+	static List<File> systemHomes(final List<String> passwd, final File homeRoot, final UidReader uids) {
 		final List<File> homes = new ArrayList<>();
 		final Set<Path> seen = new HashSet<>();
 		for (final String line : passwd) {
@@ -335,8 +370,10 @@ public final class RestoreSystemLinux {
 		final File[] dirs = homeRoot.listFiles(File::isDirectory);
 		if (dirs != null) {
 			Arrays.sort(dirs);
+			final Path root = realPath(homeRoot);
 			for (final File dir : dirs) {
-				if (seen.add(realPath(dir))) {
+				final Path real = realPath(dir);
+				if (real.startsWith(root) && ownerUid(dir, uids) >= FIRST_USER_UID && seen.add(real)) {
 					homes.add(dir);
 				}
 			}
@@ -345,6 +382,16 @@ public final class RestoreSystemLinux {
 	}
 
 	// --- Utilidades ---
+
+	/** UID del due&ntilde;o, o -1 si no se puede leer. */
+	private static int ownerUid(final File dir, final UidReader uids) {
+		try {
+			return uids.uid(dir.toPath());
+		}
+		catch (final IOException | RuntimeException e) {
+			return -1;
+		}
+	}
 
 	private static Path realPath(final File f) {
 		try {
