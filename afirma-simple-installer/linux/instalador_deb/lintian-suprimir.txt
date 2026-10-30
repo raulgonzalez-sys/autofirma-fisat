@@ -7,3 +7,5 @@ file-in-etc-not-marked-as-conffile
 no-changelog
 # El copyright de upstream menciona la GPL sin referir a /usr/share/common-licenses; aflora al renombrar doc/autofirma
 copyright-not-using-common-license-for-gpl
+# Política de Chrome en /etc/opt/chrome (ruta fija de Chrome); chk_politica_chrome impide más ficheros ahí
+dir-or-file-in-etc-opt

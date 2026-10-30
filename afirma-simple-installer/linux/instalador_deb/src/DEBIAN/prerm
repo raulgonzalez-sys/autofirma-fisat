@@ -8,6 +8,8 @@ case "$1" in
 		for pj in /etc/firefox/policies/policies.json /etc/firefox-esr/policies/policies.json; do
 			/usr/lib/Autofirma/fisat-politicas.py remove "$pj" autofirma-csp-fix@local --delete-if-empty || aviso "no se pudo quitar la extension CSP de $pj"
 		done
+		# Retira la CA de los almacenes de cada usuario (como cada usuario, con timeout; nunca aborta prerm)
+		/usr/lib/Autofirma/fisat-retirar.sh || aviso "fisat-retirar.sh ha fallado"
 		;;
 esac
 

@@ -31,7 +31,7 @@ jobs:
         run: |
           mvn -B -ntp -P env-dev,autofirma \
             -pl afirma-ui-core-jse,afirma-simple,afirma-ui-simple-configurator,afirma-ui-core-jse-keystores -am test \
-            -Dtest='AfirmaWebSocketServerTest,SecureSocketUtilsTest,ServiceInvocationManagerTest,TestRestoreConfigFirefox,CertificateSelectionPanelTest,TestConfiguratorLinuxUsers,TestConfiguratorFirefoxLinux,TestConfiguratorFirefoxCommon,TestCertUtil,NativeFileDialogsTest,JSEUIManagerNativeDialogsTest' \
+            -Dtest='AfirmaWebSocketServerTest,SecureSocketUtilsTest,ServiceInvocationManagerTest,TestRestoreConfigFirefox,RestoreConfigLinuxTest,CertificateSelectionPanelTest,TestConfiguratorLinuxUsers,TestConfiguratorFirefoxLinux,TestConfiguratorFirefoxCommon,TestCertUtil,NativeFileDialogsTest,JSEUIManagerNativeDialogsTest' \
             -Dsurefire.failIfNoSpecifiedTests=false -DfailIfNoTests=false
       - name: Tests de shell
         run: bash afirma-simple-installer/linux/instalador_deb/tests/run.sh
@@ -75,6 +75,8 @@ jobs:
           c=es/gob/afirma/standalone/protocol/AfirmaWebSocketServer.class
           cmp <(unzip -p afirma-simple/target/autofirma.jar "$c") afirma-simple/target/classes/"$c"
           echo REACTOR_OK
+          cmp <(unzip -p afirma-simple/target/autofirma.jar linux/autofirma.js) afirma-simple-installer/linux/instalador_deb/src/etc/firefox/pref/AutoFirma.js
+          echo RECURSO_OK
       - name: Construir y verificar el paquete
         run: |
           D=afirma-simple-installer/linux/instalador_deb
