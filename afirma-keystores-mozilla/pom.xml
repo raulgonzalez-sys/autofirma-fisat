@@ -47,6 +47,10 @@
 				<configuration>
 					<forkCount>1</forkCount>
 					<reuseForks>false</reuseForks>
+					<!-- Rutas de bases con tildes y enes: la JVM necesita una configuracion regional UTF-8 -->
+					<environmentVariables>
+						<LC_ALL>C.UTF-8</LC_ALL>
+					</environmentVariables>
 				</configuration>
 			</plugin>
 		</plugins>

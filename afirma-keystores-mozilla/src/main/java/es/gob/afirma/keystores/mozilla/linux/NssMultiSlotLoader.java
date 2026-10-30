@@ -24,7 +24,7 @@ import es.gob.afirma.keystores.mozilla.MozillaKeyStoreUtilities;
 /** Abre varias bases NSS (formato SQLite) en una &uacute;nica inicializaci&oacute;n de NSS,
  * con una ranura por base ({@code tokens=}) y un proveedor SunPKCS11 por ranura.
  * NSS solo se inicializa una vez por proceso, as&iacute; que {@link #load(String, List)}
- * se debe llamar una sola vez y reutilizar los proveedores que devuelve. */
+ * guarda los proveedores que crea y los devuelve en las llamadas siguientes. */
 public final class NssMultiSlotLoader {
 
 	private static final Logger LOGGER = Logger.getLogger("es.gob.afirma"); //$NON-NLS-1$
@@ -35,6 +35,12 @@ public final class NssMultiSlotLoader {
 	/** Caracteres que romper&iacute;an la sintaxis de {@code nssArgs} o de la configuraci&oacute;n
 	 * de SunPKCS11 si aparecen en la ruta de una base. */
 	private static final String UNSAFE_PATH_CHARS = "'\"[]<>\\\r\n"; //$NON-NLS-1$
+
+	/** Proveedores ya cargados en este proceso ({@code null} si a&uacute;n no se ha abierto ninguno). */
+	private static List<Provider> loaded = null;
+
+	/** Bases con las que se cargaron los proveedores de {@link #loaded}. */
+	private static List<File> loadedDbs = null;
 
 	private NssMultiSlotLoader() {
 		// No se permite la instanciacion
@@ -65,16 +71,38 @@ public final class NssMultiSlotLoader {
 	}
 
 	/** Abre las bases NSS indicadas en una sola inicializaci&oacute;n de NSS y registra un
-	 * proveedor por base (nombres {@code NSSCrypto-AFirma-1}, {@code NSSCrypto-AFirma-2}&hellip;
-	 * en el orden de las bases abiertas) con {@link Security#addProvider(Provider)}.
+	 * proveedor por base con {@link Security#addProvider(Provider)}. Sus nombres
+	 * ({@link Provider#getName()}) son {@code SunPKCS11-NSSCrypto-AFirma-1},
+	 * {@code SunPKCS11-NSSCrypto-AFirma-2}&hellip;, consecutivos y en el orden de las bases abiertas.
 	 * Si la inicializaci&oacute;n falla, se reintenta en el mismo proceso sin las bases que la
 	 * hacen fallar (se prueban primero los conjuntos m&aacute;s grandes, respetando el orden) y
-	 * se registran en el log las bases descartadas.
+	 * se registran en el log las bases descartadas. Las bases cuya ruta contiene comillas,
+	 * corchetes, {@code <}, {@code >}, barra invertida o saltos de l&iacute;nea se omiten con un aviso.
+	 * NSS solo se inicializa una vez por proceso: en cuanto se abre alguna base, las llamadas
+	 * siguientes devuelven los mismos proveedores e ignoran la lista de bases recibida.
 	 * @param libDir Directorio que contiene {@code libsoftokn3.so}.
 	 * @param dbs Directorios de las bases NSS, en orden de preferencia.
 	 * @return Proveedores ya registrados, uno por base abierta (lista vac&iacute;a si no se
 	 *         abre ninguna). */
-	static List<Provider> load(final String libDir, final List<File> dbs) {
+	static synchronized List<Provider> load(final String libDir, final List<File> dbs) {
+		if (loaded != null) {
+			if (!loadedDbs.equals(dbs)) {
+				LOGGER.warning(
+					"NSS ya esta iniciado en este proceso: se reutilizan sus proveedores y se ignora la nueva lista de bases" //$NON-NLS-1$
+				);
+			}
+			return loaded;
+		}
+		final List<Provider> providers = loadOnce(libDir, dbs);
+		if (providers.isEmpty()) {
+			return providers;
+		}
+		loaded = Collections.unmodifiableList(providers);
+		loadedDbs = new ArrayList<>(dbs);
+		return loaded;
+	}
+
+	private static List<Provider> loadOnce(final String libDir, final List<File> dbs) {
 		final List<File> candidates = new ArrayList<>();
 		for (final File db : dbs) {
 			if (isSafePath(db.getAbsolutePath())) {
@@ -98,6 +126,7 @@ public final class NssMultiSlotLoader {
 		LOGGER.warning("No se ha podido iniciar NSS con todas las bases, se reintenta precargando sus dependencias"); //$NON-NLS-1$
 		MozillaKeyStoreUtilities.loadNSSDependencies(libDir);
 
+		// Hasta 2^n intentos: quien llama pasa como mucho dos bases (Firefox y Chrome)
 		for (int size = candidates.size(); size > 0; size--) {
 			for (final List<File> subset : subsets(candidates, size)) {
 				providers = tryLoad(libDir, subset);
@@ -135,7 +164,7 @@ public final class NssMultiSlotLoader {
 		final String nssArgs = buildNssArgs(dbs);
 		final List<Provider> providers = new ArrayList<>();
 		for (int i = 0; i < dbs.size(); i++) {
-			final String config = "--name=" + PROVIDER_NAME_PREFIX + (i + 1) + "\n" //$NON-NLS-1$ //$NON-NLS-2$
+			final String config = "--name=" + PROVIDER_NAME_PREFIX + (providers.size() + 1) + "\n" //$NON-NLS-1$ //$NON-NLS-2$
 				+ "library=" + libDir + File.separator + SOFTOKN3_SO + "\n" //$NON-NLS-1$ //$NON-NLS-2$
 				+ "attributes=compatibility\n" //$NON-NLS-1$
 				+ "slot=" + slot(i) + "\n" //$NON-NLS-1$ //$NON-NLS-2$

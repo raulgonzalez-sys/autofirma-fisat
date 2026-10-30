@@ -1,6 +1,7 @@
 package es.gob.afirma.keystores.mozilla.linux;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assume.assumeTrue;
 
@@ -38,6 +39,7 @@ public class NssMultiSlotLoaderTest {
 	private static final String RESULT = "RESULTADO|"; //$NON-NLS-1$
 	private static final String PROVIDER_1 = "SunPKCS11-NSSCrypto-AFirma-1"; //$NON-NLS-1$
 	private static final String PROVIDER_2 = "SunPKCS11-NSSCrypto-AFirma-2"; //$NON-NLS-1$
+	private static final String LLAMADAS = "prueba.nss.llamadas"; //$NON-NLS-1$
 
 	/** Directorio temporal para las bases NSS. */
 	@Rule
@@ -56,8 +58,8 @@ public class NssMultiSlotLoaderTest {
 	@Test
 	public void dosBasesFirman() throws Exception {
 		final String libDir = nssLibDir();
-		final File a = crearBase("A", "certA"); //$NON-NLS-1$ //$NON-NLS-2$
-		final File b = crearBase("B", "certB"); //$NON-NLS-1$ //$NON-NLS-2$
+		final File a = crearBase("certA", "A"); //$NON-NLS-1$ //$NON-NLS-2$
+		final File b = crearBase("certB", "B"); //$NON-NLS-1$ //$NON-NLS-2$
 		assertEquals(
 			Arrays.asList(
 				RESULT + PROVIDER_1 + "|true|[certA]|256", //$NON-NLS-1$
@@ -71,7 +73,7 @@ public class NssMultiSlotLoaderTest {
 	@Test
 	public void unaBase() throws Exception {
 		final String libDir = nssLibDir();
-		final File a = crearBase("A", "certA"); //$NON-NLS-1$ //$NON-NLS-2$
+		final File a = crearBase("certA", "A"); //$NON-NLS-1$ //$NON-NLS-2$
 		assertEquals(
 			Collections.singletonList(RESULT + PROVIDER_1 + "|true|[certA]|256"), //$NON-NLS-1$
 			ejecutarEnJvmHija(libDir, a)
@@ -83,15 +85,74 @@ public class NssMultiSlotLoaderTest {
 	@Test
 	public void baseRota() throws Exception {
 		final String libDir = nssLibDir();
-		final File a = crearBase("A", "certA"); //$NON-NLS-1$ //$NON-NLS-2$
+		final File a = crearBase("certA", "A"); //$NON-NLS-1$ //$NON-NLS-2$
 		final File b = this.tmp.newFolder("B"); //$NON-NLS-1$
 		Files.write(new File(b, "cert9.db").toPath(), "no es una base".getBytes(StandardCharsets.UTF_8)); //$NON-NLS-1$ //$NON-NLS-2$
 		assertEquals(
 			Collections.singletonList(RESULT + PROVIDER_1 + "|true|[certA]|256"), //$NON-NLS-1$
 			ejecutarEnJvmHija(libDir, a, b)
 		);
-		final String log = new String(Files.readAllBytes(new File(this.tmp.getRoot(), "hija.log").toPath()), StandardCharsets.UTF_8); //$NON-NLS-1$
+		final String log = logHija();
 		assertTrue(log, log.contains(b.getAbsolutePath()));
+	}
+
+	/** Una segunda llamada en el mismo proceso, aunque sea con otra lista, devuelve los mismos
+	 * proveedores sin registrarlos otra vez. @throws Exception En cualquier error. */
+	@Test
+	public void segundaLlamadaReutiliza() throws Exception {
+		final String libDir = nssLibDir();
+		final File a = crearBase("certA", "A"); //$NON-NLS-1$ //$NON-NLS-2$
+		final File b = crearBase("certB", "B"); //$NON-NLS-1$ //$NON-NLS-2$
+		assertEquals(
+			Arrays.asList(
+				RESULT + PROVIDER_1 + "|true|[certA]|256", //$NON-NLS-1$
+				RESULT + PROVIDER_2 + "|true|[certB]|256", //$NON-NLS-1$
+				RESULT + "reutiliza|true|2" //$NON-NLS-1$
+			),
+			ejecutarEnJvmHija(Collections.singletonList("-D" + LLAMADAS + "=2"), libDir, a, b) //$NON-NLS-1$ //$NON-NLS-2$
+		);
+		final String log = logHija();
+		assertTrue(log, log.contains("se ignora la nueva lista de bases")); //$NON-NLS-1$
+	}
+
+	/** Una base en un directorio con espacios, e&ntilde;es, tildes y arroba se abre.
+	 * @throws Exception En cualquier error. */
+	@Test
+	public void rutaConEspaciosYTildes() throws Exception {
+		final String libDir = nssLibDir();
+		assumeTrue(
+			"El sistema de ficheros de la JVM no usa UTF-8", //$NON-NLS-1$
+			"UTF-8".equalsIgnoreCase(System.getProperty("sun.jnu.encoding")) //$NON-NLS-1$ //$NON-NLS-2$
+		);
+		final File a = crearBase("certA", "Usuaria \u00d1\u00fa\u00f1ez", "usuario1@example.org", "nssdb"); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+		assertEquals(
+			Collections.singletonList(RESULT + PROVIDER_1 + "|true|[certA]|256"), //$NON-NLS-1$
+			ejecutarEnJvmHija(libDir, a)
+		);
+	}
+
+	/** Las bases cuya ruta romperia la configuracion de NSS se omiten con un aviso, sin
+	 * intentar iniciar NSS con ellas. @throws Exception En cualquier error. */
+	@Test
+	public void rutaInseguraSeOmite() throws Exception {
+		final String libDir = nssLibDir();
+		final File a = crearBase("certA", "A"); //$NON-NLS-1$ //$NON-NLS-2$
+		final File comilla = crearBase("certB", "comilla'"); //$NON-NLS-1$ //$NON-NLS-2$
+		final File corchete = crearBase("certC", "corchete]"); //$NON-NLS-1$ //$NON-NLS-2$
+		final File menor = crearBase("certD", "menor<"); //$NON-NLS-1$ //$NON-NLS-2$
+		assertEquals(
+			Collections.singletonList(RESULT + PROVIDER_1 + "|true|[certA]|256"), //$NON-NLS-1$
+			ejecutarEnJvmHija(libDir, comilla, a, corchete, menor)
+		);
+		final String log = logHija();
+		for (final File db : new File[] { comilla, corchete, menor }) {
+			assertTrue(log, log.contains("Se omite la base NSS por contener caracteres no admitidos en su ruta: " + db.getAbsolutePath())); //$NON-NLS-1$
+		}
+		assertFalse(log, log.contains("No se ha podido iniciar NSS")); //$NON-NLS-1$
+	}
+
+	private String logHija() throws IOException {
+		return new String(Files.readAllBytes(new File(this.tmp.getRoot(), "hija.log").toPath()), StandardCharsets.UTF_8); //$NON-NLS-1$
 	}
 
 	private static String nssLibDir() {
@@ -108,9 +169,9 @@ public class NssMultiSlotLoaderTest {
 	}
 
 	/** Crea una base NSS sin contrase&ntilde;a con un certificado autofirmado y su clave. */
-	private File crearBase(final String dir, final String nick) throws IOException, InterruptedException {
-		final File db = this.tmp.newFolder(dir);
-		final File noise = this.tmp.newFile(dir + ".noise"); //$NON-NLS-1$
+	private File crearBase(final String nick, final String... path) throws IOException, InterruptedException {
+		final File db = this.tmp.newFolder(path);
+		final File noise = this.tmp.newFile(nick + ".noise"); //$NON-NLS-1$
 		final byte[] bytes = new byte[64];
 		new SecureRandom().nextBytes(bytes);
 		Files.write(noise.toPath(), bytes);
@@ -144,8 +205,13 @@ public class NssMultiSlotLoaderTest {
 	/** Ejecuta {@link #main(String[])} en otra JVM y devuelve sus l&iacute;neas de resultado.
 	 * El registro de la JVM hija queda en {@code hija.log} del directorio temporal. */
 	private List<String> ejecutarEnJvmHija(final String libDir, final File... dbs) throws IOException, InterruptedException {
+		return ejecutarEnJvmHija(Collections.<String>emptyList(), libDir, dbs);
+	}
+
+	private List<String> ejecutarEnJvmHija(final List<String> jvmArgs, final String libDir, final File... dbs) throws IOException, InterruptedException {
 		final List<String> cmd = new ArrayList<>();
 		cmd.add(new File(System.getProperty("java.home"), "bin/java").getAbsolutePath()); //$NON-NLS-1$ //$NON-NLS-2$
+		cmd.addAll(jvmArgs);
 		cmd.add("-cp"); //$NON-NLS-1$
 		cmd.add(System.getProperty("java.class.path")); //$NON-NLS-1$
 		cmd.add(NssMultiSlotLoaderTest.class.getName());
@@ -170,6 +236,8 @@ public class NssMultiSlotLoaderTest {
 
 	/** Punto de entrada de la JVM hija: carga las bases y, por cada proveedor, imprime su
 	 * nombre, si est&aacute; registrado, sus alias y la longitud de la firma con cada clave.
+	 * Con {@code -Dprueba.nss.llamadas=2} vuelve a cargar con la lista invertida e imprime si
+	 * obtuvo los mismos proveedores y cu&aacute;ntos hay registrados.
 	 * @param args Directorio de NSS seguido de los directorios de las bases.
 	 * @throws Exception En cualquier error. */
 	public static void main(final String[] args) throws Exception {
@@ -177,7 +245,25 @@ public class NssMultiSlotLoaderTest {
 		for (int i = 1; i < args.length; i++) {
 			dbs.add(new File(args[i]));
 		}
-		for (final Provider p : NssMultiSlotLoader.load(args[0], dbs)) {
+		final List<Provider> providers = NssMultiSlotLoader.load(args[0], dbs);
+		String reutiliza = null;
+		if (Integer.getInteger(LLAMADAS, 1).intValue() > 1) {
+			final List<File> otras = new ArrayList<>(dbs);
+			Collections.reverse(otras);
+			final List<Provider> segunda = NssMultiSlotLoader.load(args[0], otras);
+			boolean mismos = segunda.size() == providers.size();
+			for (int i = 0; mismos && i < providers.size(); i++) {
+				mismos = segunda.get(i) == providers.get(i);
+			}
+			int registrados = 0;
+			for (final Provider p : Security.getProviders()) {
+				if (p.getName().startsWith("SunPKCS11-NSSCrypto-AFirma-")) { //$NON-NLS-1$
+					registrados++;
+				}
+			}
+			reutiliza = RESULT + "reutiliza|" + mismos + "|" + registrados; //$NON-NLS-1$ //$NON-NLS-2$
+		}
+		for (final Provider p : providers) {
 			final KeyStore ks = KeyStore.getInstance("PKCS11", p); //$NON-NLS-1$
 			ks.load(null, new char[0]);
 			final List<String> aliases = Collections.list(ks.aliases());
@@ -194,6 +280,9 @@ public class NssMultiSlotLoaderTest {
 				RESULT + p.getName() + "|" + (Security.getProvider(p.getName()) == p) //$NON-NLS-1$
 					+ "|" + aliases + "|" + String.join(",", toStrings(firmas)) //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
 			);
+		}
+		if (reutiliza != null) {
+			System.out.println(reutiliza);
 		}
 	}
 
