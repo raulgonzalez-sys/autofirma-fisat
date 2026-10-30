@@ -15,7 +15,9 @@ import java.security.Provider;
 import java.security.Security;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.logging.Logger;
 
 import es.gob.afirma.core.misc.LoggerUtil;
@@ -41,6 +43,9 @@ public final class NssMultiSlotLoader {
 
 	/** Bases con las que se cargaron los proveedores de {@link #loaded}. */
 	private static List<File> loadedDbs = null;
+
+	/** Base que abre cada proveedor registrado. */
+	private static final Map<Provider, File> DATABASES = new IdentityHashMap<>();
 
 	private NssMultiSlotLoader() {
 		// No se permite la instanciacion
@@ -100,6 +105,13 @@ public final class NssMultiSlotLoader {
 		loaded = Collections.unmodifiableList(providers);
 		loadedDbs = new ArrayList<>(dbs);
 		return loaded;
+	}
+
+	/** Obtiene la base NSS que abre un proveedor devuelto por {@link #load(String, List)}.
+	 * @param provider Proveedor.
+	 * @return Directorio de la base, o {@code null} si el proveedor no es de este cargador. */
+	static synchronized File database(final Provider provider) {
+		return DATABASES.get(provider);
 	}
 
 	private static List<Provider> loadOnce(final String libDir, final List<File> dbs) {
@@ -184,6 +196,7 @@ public final class NssMultiSlotLoader {
 			}
 			Security.addProvider(p);
 			providers.add(p);
+			DATABASES.put(p, dbs.get(i));
 			LOGGER.info("Anadido proveedor PKCS#11 de NSS " + p.getName() + " para " + clean(dbs.get(i))); //$NON-NLS-1$ //$NON-NLS-2$
 		}
 		return providers;

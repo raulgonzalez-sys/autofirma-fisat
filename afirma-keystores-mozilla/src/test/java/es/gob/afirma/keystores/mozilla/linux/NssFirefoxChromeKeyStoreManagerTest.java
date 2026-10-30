@@ -2,12 +2,15 @@ package es.gob.afirma.keystores.mozilla.linux;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assume.assumeTrue;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
@@ -20,9 +23,13 @@ import java.security.Signature;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -47,6 +54,12 @@ public class NssFirefoxChromeKeyStoreManagerTest {
 	private static final String FIREFOX_PROFILE = ".mozilla/firefox/" + PROFILE; //$NON-NLS-1$
 	private static final String CHROME_DB = ".pki/nssdb"; //$NON-NLS-1$
 	private static final String P12_PASSWORD = "clave-de-prueba"; //$NON-NLS-1$
+
+	/** Los textos de la interfaz se comprueban en castellano. */
+	@BeforeClass
+	public static void castellano() {
+		Locale.setDefault(new Locale("es", "ES")); //$NON-NLS-1$ //$NON-NLS-2$
+	}
 
 	/** Directorio temporal con el directorio de usuario falso. */
 	@Rule
@@ -134,6 +147,91 @@ public class NssFirefoxChromeKeyStoreManagerTest {
 			),
 			ejecutarEnJvmHija(home)
 		);
+	}
+
+	/** El certificado est&aacute; sin clave en Firefox (solo el {@code .cer}) y con clave en
+	 * Chrome: se conserva la copia con clave, que aparece y firma. SunPKCS11 no lista los
+	 * certificados sin clave de NSS, as&iacute; que la preferencia por la copia con clave se
+	 * comprueba sin NSS en {@link #dedupPrefiereConClaveSinNss()}. @throws Exception En cualquier error. */
+	@Test
+	public void dedupPrefiereConClave() throws Exception {
+		nssLibDir();
+		final File home = this.tmp.newFolder("home"); //$NON-NLS-1$
+		crearPerfilFirefox(home);
+		final File firefox = new File(home, FIREFOX_PROFILE);
+		final File chrome = new File(home, CHROME_DB);
+		crearBase(chrome, "certA", "CN=certA"); //$NON-NLS-1$ //$NON-NLS-2$
+		final File cer = new File(this.tmp.getRoot(), "certA.cer"); //$NON-NLS-1$
+		ejecutar(CERTUTIL.getPath(), "-L", "-n", "certA", "-r", "-o", cer.getAbsolutePath(), "-d", "sql:" + chrome.getAbsolutePath()); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$ //$NON-NLS-5$ //$NON-NLS-6$ //$NON-NLS-7$ //$NON-NLS-8$
+		Files.createDirectories(firefox.toPath());
+		ejecutar(CERTUTIL.getPath(), "-N", "--empty-password", "-d", "sql:" + firefox.getAbsolutePath()); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+		ejecutar(CERTUTIL.getPath(), "-A", "-n", "certA", "-t", "P,P,P", "-i", cer.getAbsolutePath(), "-d", "sql:" + firefox.getAbsolutePath()); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$ //$NON-NLS-5$ //$NON-NLS-6$ //$NON-NLS-7$ //$NON-NLS-8$
+		assertEquals(
+			Arrays.asList(
+				RESULT + "certA|CN=certA|true", //$NON-NLS-1$
+				RESULT + "refresco|[certA]|2" //$NON-NLS-1$
+			),
+			ejecutarEnJvmHija(home)
+		);
+	}
+
+	/** Sin NSS: un certificado sin clave en el primer almac&eacute;n (Firefox) y con clave en el
+	 * segundo (Chrome) queda una sola vez y apunta al almac&eacute;n con clave.
+	 * @throws Exception En cualquier error. */
+	@Test
+	public void dedupPrefiereConClaveSinNss() throws Exception {
+		final File p12 = new File(this.tmp.getRoot(), "certA.p12"); //$NON-NLS-1$
+		ejecutar(
+			new File(System.getProperty("java.home"), "bin/keytool").getAbsolutePath(), //$NON-NLS-1$ //$NON-NLS-2$
+			"-genkeypair", "-keystore", p12.getAbsolutePath(), "-storetype", "PKCS12", //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+			"-storepass", P12_PASSWORD, "-alias", "certa", "-dname", "CN=certA", //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+			"-keyalg", "RSA", "-keysize", "2048", "-validity", "30" //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$ //$NON-NLS-5$ //$NON-NLS-6$
+		);
+		// PKCS#12 guarda los alias en minusculas
+		final KeyStore conClave = KeyStore.getInstance("PKCS12"); //$NON-NLS-1$
+		try (InputStream is = new FileInputStream(p12)) {
+			conClave.load(is, P12_PASSWORD.toCharArray());
+		}
+		final KeyStore sinClave = KeyStore.getInstance("PKCS12"); //$NON-NLS-1$
+		sinClave.load(null, null);
+		sinClave.setCertificateEntry("certa", conClave.getCertificate("certa")); //$NON-NLS-1$ //$NON-NLS-2$
+		final AOKeyStoreManager firefox = new AlmacenFijo(sinClave);
+		final AOKeyStoreManager chrome = new AlmacenFijo(conClave);
+
+		final Map<String, NssFirefoxChromeKeyStoreManager.SlotEntry> entries =
+			NssFirefoxChromeKeyStoreManager.buildEntries(Arrays.asList(firefox, chrome));
+		assertEquals(Collections.singletonList("certa"), new ArrayList<>(entries.keySet())); //$NON-NLS-1$
+		assertSame(chrome, entries.get("certa").slot); //$NON-NLS-1$
+
+		// Con la clave en el primero, se queda el primero
+		final Map<String, NssFirefoxChromeKeyStoreManager.SlotEntry> inverso =
+			NssFirefoxChromeKeyStoreManager.buildEntries(Arrays.asList(chrome, firefox));
+		assertEquals(Collections.singletonList("certa"), new ArrayList<>(inverso.keySet())); //$NON-NLS-1$
+		assertSame(chrome, inverso.get("certa").slot); //$NON-NLS-1$
+	}
+
+	/** El di&aacute;logo de contrase&ntilde;a dice si la base es la de Firefox o la de Chrome.
+	 * @throws Exception En cualquier error. */
+	@Test
+	public void textoContrasenaPorBase() throws Exception {
+		final File home = this.tmp.newFolder("home"); //$NON-NLS-1$
+		Files.createDirectories(new File(home, CHROME_DB).toPath());
+		assertEquals(
+			"Contrase\u00f1a del almac\u00e9n de Chrome", //$NON-NLS-1$
+			NssFirefoxChromeKeyStoreManager.passwordPrompt(new File(home, CHROME_DB), home)
+		);
+		assertEquals(
+			"Contrase\u00f1a del almac\u00e9n de Firefox", //$NON-NLS-1$
+			NssFirefoxChromeKeyStoreManager.passwordPrompt(new File(home, FIREFOX_PROFILE), home)
+		);
+	}
+
+	/** Almac&eacute;n de prueba sobre un {@code KeyStore} ya cargado. */
+	private static final class AlmacenFijo extends AOKeyStoreManager {
+		AlmacenFijo(final KeyStore ks) {
+			setKeyStore(ks);
+			setKeyStoreType(AOKeyStore.PKCS12);
+		}
 	}
 
 	/** En Linux los dos gestores de Mozilla usan el almac&eacute;n de Firefox y Chrome.
@@ -245,7 +343,8 @@ public class NssFirefoxChromeKeyStoreManagerTest {
 	}
 
 	/** Punto de entrada de la JVM hija: inicia el almac&eacute;n y, por cada alias, imprime
-	 * el sujeto de su certificado y si la firma con su clave se verifica con ese certificado.
+	 * el sujeto de su certificado y si la firma con su clave se verifica con ese certificado
+	 * ({@code sinclave} si no tiene clave privada).
 	 * Despu&eacute;s refresca el almac&eacute;n e imprime sus alias y cu&aacute;ntos proveedores
 	 * NSS hay registrados.
 	 * @param args No se usan.
@@ -255,6 +354,10 @@ public class NssFirefoxChromeKeyStoreManagerTest {
 		ksm.init(AOKeyStore.MOZ_UNI, null, null, null, false);
 		for (final String alias : ksm.getAliases()) {
 			final X509Certificate cert = ksm.getCertificate(alias);
+			if (!ksm.isKeyEntry(alias)) {
+				System.out.println(RESULT + alias + "|" + cert.getSubjectX500Principal().getName() + "|sinclave"); //$NON-NLS-1$ //$NON-NLS-2$
+				continue;
+			}
 			final KeyStore.PrivateKeyEntry entry = ksm.getKeyEntry(alias);
 			final byte[] data = "datos".getBytes(StandardCharsets.UTF_8); //$NON-NLS-1$
 			final Signature s = Signature.getInstance("SHA256withRSA"); //$NON-NLS-1$

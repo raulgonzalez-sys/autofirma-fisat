@@ -22,18 +22,19 @@ import java.security.cert.CertificateEncodingException;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import javax.security.auth.callback.PasswordCallback;
 
 import es.gob.afirma.core.AOCancelledOperationException;
 import es.gob.afirma.core.misc.AOUtil;
 import es.gob.afirma.keystores.AOKeyStore;
+import es.gob.afirma.keystores.AOKeyStoreManager;
 import es.gob.afirma.keystores.AggregatedKeyStoreManager;
+import es.gob.afirma.keystores.mozilla.FirefoxKeyStoreMessages;
 import es.gob.afirma.keystores.mozilla.MozillaKeyStoreUtilities;
 
 /** Almac&eacute;n NSS de Linux que re&uacute;ne en una sola lista los certificados de la base
@@ -42,12 +43,13 @@ import es.gob.afirma.keystores.mozilla.MozillaKeyStoreUtilities;
  * ({@link NssMultiSlotLoader#load(String, List)}), as&iacute; que los proveedores se crean una
  * vez por proceso y se reutilizan al reiniciar o refrescar el almac&eacute;n.
  * Un certificado presente en las dos bases (misma huella SHA-256) aparece una sola vez, tomado
- * de Firefox. Si dos certificados distintos tienen el mismo alias, el segundo se muestra con
- * un sufijo ({@code alias (2)}) para que cada alias firme con su propia clave. */
+ * de Firefox salvo que solo en Chrome tenga clave privada. Si dos certificados distintos
+ * tienen el mismo alias, el segundo se muestra con un sufijo ({@code alias (2)}) para que cada
+ * alias firme con su propia clave. */
 public final class NssFirefoxChromeKeyStoreManager extends AggregatedKeyStoreManager {
 
 	/** Gestores de cada ranura, en el orden de las bases (Firefox primero). */
-	private final List<NssSlotKeyStoreManager> slots = new ArrayList<>();
+	private final List<AOKeyStoreManager> slots = new ArrayList<>();
 
 	/** Alias visibles y la ranura y alias real a los que corresponden ({@code null} si hay
 	 * que volver a calcularlos). */
@@ -75,8 +77,13 @@ public final class NssFirefoxChromeKeyStoreManager extends AggregatedKeyStoreMan
 		setKeyStore(null);
 		setKeyStoreType(AOKeyStore.MOZ_UNI);
 
-		for (final Provider provider : loadProviders()) {
-			final NssSlotKeyStoreManager slot = new NssSlotKeyStoreManager(provider, getParentComponent());
+		final File home = new File(System.getProperty("user.home")); //$NON-NLS-1$
+		for (final Provider provider : loadProviders(home)) {
+			final NssSlotKeyStoreManager slot = new NssSlotKeyStoreManager(
+				provider,
+				passwordPrompt(NssMultiSlotLoader.database(provider), home),
+				getParentComponent()
+			);
 			try {
 				slot.init(AOKeyStore.MOZ_UNI, null, pssCallBack, params, forceReset);
 			}
@@ -98,8 +105,8 @@ public final class NssFirefoxChromeKeyStoreManager extends AggregatedKeyStoreMan
 		}
 	}
 
-	private static List<Provider> loadProviders() {
-		final List<File> dbs = NssLinuxDatabases.findDatabases(new File(System.getProperty("user.home"))); //$NON-NLS-1$
+	private static List<Provider> loadProviders(final File home) {
+		final List<File> dbs = NssLinuxDatabases.findDatabases(home);
 		if (dbs.isEmpty()) {
 			LOGGER.info("No se han encontrado bases NSS de Firefox ni de Chrome"); //$NON-NLS-1$
 			return Collections.emptyList();
@@ -111,6 +118,16 @@ public final class NssFirefoxChromeKeyStoreManager extends AggregatedKeyStoreMan
 			LOGGER.warning("No se ha encontrado NSS en el sistema: " + e); //$NON-NLS-1$
 			return Collections.emptyList();
 		}
+	}
+
+	/** Texto del di&aacute;logo de contrase&ntilde;a de una base: el de Firefox o el de Chrome
+	 * seg&uacute;n sea la base de Chrome del usuario. */
+	static String passwordPrompt(final File db, final File home) {
+		final File chrome = NssLinuxDatabases.chromeDatabase(home);
+		if (db != null && chrome != null && db.getAbsoluteFile().equals(chrome.getAbsoluteFile())) {
+			return FirefoxKeyStoreMessages.getString("NssFirefoxChromeKeyStoreManager.0"); //$NON-NLS-1$
+		}
+		return FirefoxKeyStoreMessages.getString("MozillaUnifiedKeyStoreManager.0"); //$NON-NLS-1$
 	}
 
 	@Override
@@ -128,14 +145,19 @@ public final class NssFirefoxChromeKeyStoreManager extends AggregatedKeyStoreMan
 	/** Devuelve los alias de todas las bases, sin certificados repetidos por huella SHA-256. */
 	@Override
 	public String[] getAliases() {
-		this.entries = buildEntries();
+		this.entries = buildEntries(this.slots);
 		return this.entries.keySet().toArray(new String[0]);
 	}
 
-	private Map<String, SlotEntry> buildEntries() {
+	/** Re&uacute;ne los alias de los almacenes en orden. De un certificado repetido (misma huella
+	 * SHA-256) queda una sola entrada: la primera, salvo que una posterior tenga clave privada y
+	 * la primera no, para que el certificado con el que se puede firmar no quede oculto.
+	 * @param stores Almacenes de las bases, Firefox primero.
+	 * @return Alias visibles y el almac&eacute;n y alias real que corresponden a cada uno. */
+	static Map<String, SlotEntry> buildEntries(final List<? extends AOKeyStoreManager> stores) {
 		final Map<String, SlotEntry> ret = new LinkedHashMap<>();
-		final Set<String> thumbprints = new HashSet<>();
-		for (final NssSlotKeyStoreManager slot : this.slots) {
+		final Map<String, String> visibleByThumbprint = new HashMap<>();
+		for (final AOKeyStoreManager slot : stores) {
 			final String[] aliases;
 			try {
 				aliases = slot.getAliases();
@@ -146,7 +168,12 @@ public final class NssFirefoxChromeKeyStoreManager extends AggregatedKeyStoreMan
 			}
 			for (final String alias : aliases) {
 				final String thumbprint = sha256(slot.getCertificate(alias));
-				if (thumbprint != null && !thumbprints.add(thumbprint)) {
+				final String previous = thumbprint != null ? visibleByThumbprint.get(thumbprint) : null;
+				if (previous != null) {
+					final SlotEntry stored = ret.get(previous);
+					if (!hasKey(stored.slot, stored.alias) && hasKey(slot, alias)) {
+						ret.put(previous, new SlotEntry(slot, alias));
+					}
 					continue;
 				}
 				String visible = alias;
@@ -154,9 +181,22 @@ public final class NssFirefoxChromeKeyStoreManager extends AggregatedKeyStoreMan
 					visible = alias + " (" + n + ")"; //$NON-NLS-1$ //$NON-NLS-2$
 				}
 				ret.put(visible, new SlotEntry(slot, alias));
+				if (thumbprint != null) {
+					visibleByThumbprint.put(thumbprint, visible);
+				}
 			}
 		}
 		return ret;
+	}
+
+	private static boolean hasKey(final AOKeyStoreManager store, final String alias) {
+		try {
+			return store.isKeyEntry(alias);
+		}
+		catch (final Exception e) {
+			LOGGER.warning("No se ha podido comprobar si un certificado tiene clave privada: " + e); //$NON-NLS-1$
+			return false;
+		}
 	}
 
 	private static String sha256(final X509Certificate cert) {
@@ -174,7 +214,7 @@ public final class NssFirefoxChromeKeyStoreManager extends AggregatedKeyStoreMan
 
 	private SlotEntry resolve(final String alias) {
 		if (this.entries == null) {
-			this.entries = buildEntries();
+			this.entries = buildEntries(this.slots);
 		}
 		return alias != null ? this.entries.get(alias) : null;
 	}
@@ -227,12 +267,12 @@ public final class NssFirefoxChromeKeyStoreManager extends AggregatedKeyStoreMan
 		return getType();
 	}
 
-	/** Ranura y alias real que corresponden a un alias visible. */
-	private static final class SlotEntry {
-		final NssSlotKeyStoreManager slot;
+	/** Almac&eacute;n y alias real que corresponden a un alias visible. */
+	static final class SlotEntry {
+		final AOKeyStoreManager slot;
 		final String alias;
 
-		SlotEntry(final NssSlotKeyStoreManager slot, final String alias) {
+		SlotEntry(final AOKeyStoreManager slot, final String alias) {
 			this.slot = slot;
 			this.alias = alias;
 		}
