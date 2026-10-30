@@ -121,6 +121,7 @@ Clases que ejecuta el job `pruebas` (`-Dtest` del workflow). JUnit 4, nombre
 | `SecureSocketUtilsTest` | `afirma-simple` | I3 |
 | `ServiceInvocationManagerTest` | `afirma-simple` | socket heredado solo en 127.0.0.1 |
 | `TestRestoreConfigFirefox` | `afirma-simple` | I7 |
+| `RestoreConfigLinuxTest` | `afirma-simple` | f24 recurso autofirma.js |
 | `CertificateSelectionPanelTest` | `afirma-ui-core-jse-keystores` | I5 |
 | `TestConfiguratorLinuxUsers` | `afirma-ui-simple-configurator` | I1 |
 | `TestConfiguratorFirefoxLinux` | `afirma-ui-simple-configurator` | I7 |
