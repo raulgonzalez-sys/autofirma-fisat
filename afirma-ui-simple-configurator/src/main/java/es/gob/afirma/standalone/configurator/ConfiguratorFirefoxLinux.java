@@ -164,14 +164,7 @@ final class ConfiguratorFirefoxLinux {
 				});
 
 				// Agregamos el script de desinstalacion
-				uninstallCommands.add(new String[] {
-						certUtilPath,
-						"-D", //$NON-NLS-1$
-						"-d", //$NON-NLS-1$
-						profileReference,
-						"-n", //$NON-NLS-1$
-						"\"" + ConfiguratorUtil.CERT_ALIAS + "\"" //$NON-NLS-1$ //$NON-NLS-2$
-				});
+				uninstallCommands.add(buildUninstallCommand(certUtilPath, profileReference));
 			}
 		}
 
@@ -334,16 +327,40 @@ final class ConfiguratorFirefoxLinux {
 			createScript(installCACommands, installScriptFile);
 
 			// Generamos el script de desinstalacion
-			final String[] uninstallCACommans = new String[] {
-					certUtilAbsolutePath,
-					"-D", //$NON-NLS-1$
-					"-d", //$NON-NLS-1$
-					profileReference,
-					"-n", //$NON-NLS-1$
-					"\"" + ConfiguratorUtil.CERT_ALIAS + "\"" //$NON-NLS-1$ //$NON-NLS-2$
-			};
-			createScript(uninstallCACommans, uninstallScriptFile);
+			createScript(buildUninstallCommand(certUtilAbsolutePath, profileReference), uninstallScriptFile);
 		}
+	}
+
+	/** Compone la l&iacute;nea de desinstalaci&oacute;n del certificado de CA de un almac&eacute;n.
+	 * <p>
+	 * <code>certutil -D</code> borra una sola entrada por llamada y un almac&eacute;n puede
+	 * tener varias con el mismo apodo, as&iacute; que se repite mientras <code>certutil -L</code>
+	 * siga encontrando el apodo, con un m&aacute;ximo de 5 intentos. Solo se borran las
+	 * entradas con el apodo exacto {@link ConfiguratorUtil#CERT_ALIAS}.
+	 * </p>
+	 * @param certUtilPath Ruta del ejecutable certutil.
+	 * @param profileReference Referencia al almac&eacute;n (con prefijo <code>sql:</code> si
+	 *        procede), ya <i>escapada</i>.
+	 * @return Elementos de la l&iacute;nea de <i>script</i>, que se unen con espacios. */
+	static String[] buildUninstallCommand(final String certUtilPath, final String profileReference) {
+		final String alias = "\"" + ConfiguratorUtil.CERT_ALIAS + "\""; //$NON-NLS-1$ //$NON-NLS-2$
+		return new String[] {
+				"for i in 1 2 3 4 5; do", //$NON-NLS-1$
+				certUtilPath,
+				"-L", //$NON-NLS-1$
+				"-d", //$NON-NLS-1$
+				profileReference,
+				"-n", //$NON-NLS-1$
+				alias,
+				"</dev/null >/dev/null 2>&1 || break;", //$NON-NLS-1$
+				certUtilPath,
+				"-D", //$NON-NLS-1$
+				"-d", //$NON-NLS-1$
+				profileReference,
+				"-n", //$NON-NLS-1$
+				alias,
+				"</dev/null || break; done" //$NON-NLS-1$
+		};
 	}
 
 	/** Escribe en disco un <i>script</i> con un comando.
