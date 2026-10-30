@@ -215,6 +215,24 @@ chk_usuario() {
 	[ -z "$malos" ] || { echo "ausentes o sin modo 755 en ./usr/lib/Autofirma/:$malos"; return 1; }
 }
 
+# Política de Chrome: un único fichero bajo ./etc/opt/ con el JSON exacto de AutoLaunchProtocolsFromOrigins
+chk_politica_chrome() {
+	local f=etc/opt/chrome/policies/managed/autofirma-fisat.json extra
+	[ -f "$X/$f" ] || { echo "falta ./$f"; return 1; }
+	jq -e '. == {"AutoLaunchProtocolsFromOrigins":[{"protocol":"afirma","allowed_origins":["*"]}]}' "$X/$f" >/dev/null || { echo "contenido de ./$f distinto del esperado"; return 1; }
+	extra=$(rutas | grep '^\./etc/opt/' | grep -vxF -e ./etc/opt/ -e ./etc/opt/chrome/ -e ./etc/opt/chrome/policies/ -e ./etc/opt/chrome/policies/managed/ -e "./$f" || true)
+	[ -z "$extra" ] || { echo "rutas extra bajo ./etc/opt/: $(echo "$extra" | tr '\n' ' ')"; return 1; }
+}
+
+# postinst avisa de reiniciar Chrome antes del último exit 0
+chk_aviso_chrome() {
+	local n e
+	n=$(grep -nF 'reinicie Chrome' "$X/DEBIAN/postinst" | head -n 1 | cut -d: -f1 || true)
+	e=$(grep -n '^exit 0' "$X/DEBIAN/postinst" | tail -n 1 | cut -d: -f1 || true)
+	[ -n "$n" ] || { echo "postinst no avisa de reiniciar Chrome"; return 1; }
+	[ "$n" -lt "${e:-0}" ] || { echo "el aviso de Chrome (línea $n) no va antes de exit 0 (línea ${e:-ninguna})"; return 1; }
+}
+
 chk_maintainer_shellcheck() {
 	local s salida
 	for s in preinst postinst prerm postrm; do
