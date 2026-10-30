@@ -51,4 +51,5 @@ done
 
 # borramos los ficheros de instalacion
 rm -f /usr/lib/Autofirma/script.sh /usr/lib/Autofirma/Autofirma_ROOT.crt || aviso "no se pudieron borrar los ficheros de instalacion"
+echo "AutoFirma: reinicie Chrome (o cierre la sesión y vuelva a entrar) para que AutoFirma funcione desde la web."
 exit 0

@@ -137,6 +137,15 @@ Clases que ejecuta el job `pruebas` (`-Dtest` del workflow). JUnit 4, nombre
   y se diagnostica con `/usr/lib/Autofirma/fisat-usuario.sh --check` (sale 0
   si está todo bien, 1 si hay algo pendiente, 2 si hay error).
 
+### Chrome y AutoFirma desde la web
+
+- Almacén de Chrome: `~/.pki/nssdb` si existe; si no, `${XDG_DATA_HOME:-~/.local/share}/pki/nssdb`. El paso por usuario instala la CA en los dos.
+- Chrome solo lee la CA al arrancar. Tras instalar o actualizar el paquete (la CA se regenera en cada actualización) hay que reiniciar Chrome o cerrar la sesión: probado, Chrome no acepta en caliente una CA añadida a su almacén abierto. `postinst` lo avisa.
+- Política `/etc/opt/chrome/policies/managed/autofirma-fisat.json` (`AutoLaunchProtocolsFromOrigins`, protocolo `afirma`, `allowed_origins: ["*"]`): Chrome lanza `afirma://` sin preguntar y cualquier origen puede hacerlo. Comprobar en `chrome://policy`. Chromium no está incluido.
+- Ciclo de vida de AutoFirma lanzado desde la web: vive mientras la pestaña mantiene abierto el websocket. Se cierra al cerrar la pestaña o Chrome (código 1001), al cortarse la conexión o suspender el equipo (1006), o a los 30 s si nunca llega a conectarse. No es un fallo.
+- Desinstalación: el `uninstall.sh` del Configurador y `fisat-retirar.sh` (que ejecuta `fisat-usuario.sh --remove` como cada usuario) borran solo `SocketAutoFirma` y `Autofirma ROOT`, en los almacenes de cada usuario, incluido el XDG de Chrome. Los certificados personales y sus claves no se tocan. Los usuarios de red que no salen en `getent passwd` ni tienen el home en `/home/*` no se limpian.
+- Diagnóstico: `fisat-usuario.sh --check` incluye el almacén XDG.
+
 ### Diálogos de ficheros (Linux)
 
 - Orden: `kdialog` si la sesión es KDE (`XDG_CURRENT_DESKTOP` contiene `KDE`),
