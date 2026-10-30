@@ -48,6 +48,7 @@ final class RestoreConfigLinux implements RestoreConfig {
     private static final String FILE_AUTOFIRMA_CERTIFICATE = "Autofirma_ROOT.cer"; //$NON-NLS-1$
     private static final String KS_PASSWORD = "654321"; //$NON-NLS-1$
     private static final String PROTOCOL_HANDLER_CONFIG_FILE = "autofirma.js"; //$NON-NLS-1$
+    static final String PROTOCOL_HANDLER_RESOURCE = "/linux/autofirma.js"; //$NON-NLS-1$
     private static final String DEFAULT_PROTOCOL_HANDLER_CONFIG_DIR = "/etc/firefox/pref"; //$NON-NLS-1$
     static final String EXPORT_PATH = "export PATH=$PATH:"; //$NON-NLS-1$
     static final String EXPORT_LD_LIBRARY ="export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:"; //$NON-NLS-1$
