@@ -5,6 +5,19 @@ if [ -x "$USUARIO" ]; then
 	timeout "${AUTOFIRMA_FISAT_TIMEOUT:-20}" "$USUARIO" --quiet || true
 fi
 
+# Sin locale UTF-8 la JVM usa ASCII (sun.jnu.encoding) y corrompe rutas con tildes o ñ; LC_ALL manda sobre LC_CTYPE.
+locale_car=${LC_ALL:-${LC_CTYPE:-$LANG}}
+case ${locale_car,,} in
+*utf-8* | *utf8*) ;;
+*)
+	if [ -n "$LC_ALL" ]; then
+		export LC_ALL=C.UTF-8
+	else
+		export LC_CTYPE=C.UTF-8
+	fi
+	;;
+esac
+
 exec java \
 	-Dswing.defaultlaf=javax.swing.plaf.nimbus.NimbusLookAndFeel \
 	-Dswing.systemlaf=javax.swing.plaf.nimbus.NimbusLookAndFeel \
