@@ -24,7 +24,7 @@ dpkg-deb -e "$DEB" "$X/DEBIAN"
 listado() { dpkg-deb --fsys-tarfile "$DEB" | tar -tvf - | awk '{print $1, $2, $6}'; }
 
 chk_control_depends() {
-	local d esperado='libnss3-tools, openjdk-21-jre | default-jre, openssl, ca-certificates, pkexec'
+	local d esperado='libnss3-tools, openjdk-21-jre | default-jre, openssl, ca-certificates, pkexec | policykit-1'
 	d=$(dpkg-deb -f "$DEB" Depends)
 	[ "$d" = "$esperado" ] || { echo "Depends='$d'"; return 1; }
 	case $d in *headless*) echo "Depends contiene headless"; return 1 ;; esac
@@ -159,7 +159,9 @@ chk_restaurar() {
 	dentro=$(awk '/^[[:space:]]*remove\|deconfigure\)/ {d=1} d==1 && /^[[:space:]]*\/usr\/bin\/autofirma restaurar --quitar-politicas \|\| aviso / {print} /;;/ {d=0}' "$X/DEBIAN/prerm")
 	[ -n "$dentro" ] || { echo "prerm no llama a '/usr/bin/autofirma restaurar --quitar-politicas || aviso ...' dentro de remove|deconfigure"; return 1; }
 	[ -z "$fuera" ] || { echo "prerm llama a restaurar --quitar-politicas fuera de remove|deconfigure: $fuera"; return 1; }
-	obsoletos=$(grep -nE 'fisat-usuario|fisat-retirar|fisat-politicas|script\.sh|uninstall\.sh|autofirmaConfigurador' "$X"/DEBIAN/* || true)
+	# El autostart retirado solo se nombra para quitar su conffile (chk_rm_conffile)
+	obsoletos=$(grep -nE 'fisat-usuario|fisat-retirar|fisat-politicas|script\.sh|uninstall\.sh|autofirmaConfigurador' "$X"/DEBIAN/* \
+		| grep -vF 'autofirma-fisat-usuario.desktop' || true)
 	[ -z "$obsoletos" ] || { echo "los maintainer scripts usan piezas retiradas: $obsoletos"; return 1; }
 }
 
@@ -216,6 +218,16 @@ chk_maintainer_shellcheck() {
 	local s salida
 	for s in preinst postinst prerm postrm; do
 		salida=$(shellcheck -s bash -x "$X/DEBIAN/$s" 2>&1) || { echo "$s: $salida" | head -n 20; return 1; }
+	done
+}
+
+# preinst, postinst y postrm retiran el conffile del autostart de las versiones anteriores a fisat5, siempre
+# con la misma version de corte y sin que un fallo pare el script
+chk_rm_conffile() {
+	local s re='^[[:space:]]+dpkg-maintscript-helper rm_conffile /etc/xdg/autostart/autofirma-fisat-usuario\.desktop 1\.9\.1\+fisat5~ -- "\$@" \|\| aviso '
+	for s in preinst postinst postrm; do
+		grep -Eq "$re" "$X/DEBIAN/$s" || { echo "$s no lleva 'dpkg-maintscript-helper rm_conffile <autostart> 1.9.1+fisat5~ -- \"\$@\" || aviso ...'"; return 1; }
+		grep -Eq '^if dpkg-maintscript-helper supports rm_conffile' "$X/DEBIAN/$s" || { echo "$s: rm_conffile sin 'if dpkg-maintscript-helper supports rm_conffile'"; return 1; }
 	done
 }
 

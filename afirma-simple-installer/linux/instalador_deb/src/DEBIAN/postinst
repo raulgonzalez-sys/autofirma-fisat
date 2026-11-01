@@ -1,6 +1,12 @@
 #!/bin/bash
 aviso() { echo "autofirma $0: AVISO: $*" >&2; }
 
+# El autostart autofirma-fisat-usuario.desktop fue conffile antes de fisat5 y ya no existe: dpkg lo conservaria
+# al actualizar y cada inicio de sesion ejecutaria un script borrado
+if dpkg-maintscript-helper supports rm_conffile 2>/dev/null; then
+	dpkg-maintscript-helper rm_conffile /etc/xdg/autostart/autofirma-fisat-usuario.desktop 1.9.1+fisat5~ -- "$@" || aviso "no se pudo retirar el autostart antiguo"
+fi
+
 # Certificado raiz y almacen SSL, AutoFirma.js, extension CSP de Firefox y la parte de cada usuario
 echo "Preparacion de AutoFirma: certificados, Firefox y Chrome"
 /usr/bin/autofirma restaurar --sistema || aviso "la restauracion del sistema ha fallado"

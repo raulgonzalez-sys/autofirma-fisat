@@ -333,7 +333,83 @@ public final class RestoreSystemLinuxTest {
 				"ana:x:1000:1000:Ana:" + link + ":/bin/bash", //$NON-NLS-1$ //$NON-NLS-2$
 				"nadie:x:1002:1002::" + new File(this.tmp.getRoot(), "no-existe") + ":/bin/bash", //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
 				"roto"); //$NON-NLS-1$
-		assertEquals(Arrays.asList(other, link, b), RestoreSystemLinux.systemHomes(passwd, homeRoot, uids));
+		final RestoreReport report = new RestoreReport(null);
+		assertEquals(Arrays.asList(other, link, b), RestoreSystemLinux.systemHomes(passwd, homeRoot, uids, report,
+				TimeUnit.SECONDS.toMillis(RestoreSystemLinux.HOME_CHECK_SECONDS),
+				TimeUnit.SECONDS.toMillis(RestoreSystemLinux.HOMES_BUDGET_SECONDS)));
+		assertTrue(report.getLines().toString(), report.getLines().isEmpty());
+	}
+
+	/** Un home que no responde (un montaje NFS {@code hard} ca&iacute;do, aqu&iacute; un lector del
+	 * due&ntilde;o bloqueado) se salta con AVISO al agotar su tiempo y la b&uacute;squeda sigue.
+	 * @throws Exception En cualquier error. */
+	@Test
+	public void homeQueNoResponde() throws Exception {
+		final File homeRoot = this.tmp.newFolder("home"); //$NON-NLS-1$
+		final File a = new File(homeRoot, "a"); //$NON-NLS-1$
+		final File colgado = new File(homeRoot, "colgado"); //$NON-NLS-1$
+		final File z = new File(homeRoot, "z"); //$NON-NLS-1$
+		assertTrue(a.mkdir() && colgado.mkdir() && z.mkdir());
+		final java.util.concurrent.CountDownLatch never = new java.util.concurrent.CountDownLatch(1);
+		final RestoreSystemLinux.UidReader uids = p -> {
+			if ("colgado".equals(p.getFileName().toString())) { //$NON-NLS-1$
+				try {
+					never.await();
+				}
+				catch (final InterruptedException e) {
+					Thread.currentThread().interrupt();
+				}
+			}
+			return 1000;
+		};
+		final RestoreReport report = new RestoreReport(null);
+		final long start = System.nanoTime();
+		try {
+			assertEquals(Arrays.asList(a, z), RestoreSystemLinux.systemHomes(Collections.<String>emptyList(), homeRoot,
+					uids, report, 300, 30000));
+		}
+		finally {
+			never.countDown();
+		}
+		assertTrue(TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - start) < 10);
+		assertTrue(report.getLines().toString(), hasLine(report, RestoreReport.WARNING, colgado.getPath() + " no responde")); //$NON-NLS-1$
+		assertFalse(report.hasErrors());
+	}
+
+	/** Agotado el tiempo total de la b&uacute;squeda, se saltan los homes que quedan con un solo AVISO.
+	 * @throws Exception En cualquier error. */
+	@Test
+	public void busquedaDeHomesAcotada() throws Exception {
+		final File homeRoot = this.tmp.newFolder("home"); //$NON-NLS-1$
+		for (final String name : new String[] { "a", "b", "c", "d" }) { //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+			assertTrue(new File(homeRoot, name).mkdir());
+		}
+		final java.util.concurrent.CountDownLatch never = new java.util.concurrent.CountDownLatch(1);
+		final RestoreSystemLinux.UidReader uids = p -> {
+			try {
+				never.await();
+			}
+			catch (final InterruptedException e) {
+				Thread.currentThread().interrupt();
+			}
+			return 1000;
+		};
+		final RestoreReport report = new RestoreReport(null);
+		final long start = System.nanoTime();
+		try {
+			assertTrue(RestoreSystemLinux.systemHomes(Collections.<String>emptyList(), homeRoot, uids, report, 400, 600)
+					.isEmpty());
+		}
+		finally {
+			never.countDown();
+		}
+		assertTrue(TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - start) < 10);
+		int agotado = 0;
+		for (final String line : report.getLines()) {
+			agotado += line.contains("Se ha agotado el tiempo") ? 1 : 0; //$NON-NLS-1$
+		}
+		assertEquals(report.getLines().toString(), 1, agotado);
+		assertFalse(report.hasErrors());
 	}
 
 	/** El comando por home lleva {@code timeout} dentro de {@code runuser} y {@code HOME} del home.

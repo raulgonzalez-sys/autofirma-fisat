@@ -194,7 +194,9 @@ final class RestoreConfigPanelLinux {
 		panel.appendMessage(SimpleAfirmaMessages.getString("RestoreConfigPanelLinux.10", home.getPath())); //$NON-NLS-1$
 		final RestoreReport report = new RestoreReport(panel::appendMessage);
 		try {
-			RestoreUserLinux.restore(home, new File(RestoreCommandLinux.CA_FILE), report);
+			if (RestoreCommandLinux.userHomeAllowed(home, report)) {
+				RestoreUserLinux.restore(home, new File(RestoreCommandLinux.CA_FILE), report);
+			}
 		}
 		catch (final RuntimeException e) {
 			LOGGER.log(Level.SEVERE, "Error al restaurar el usuario", e); //$NON-NLS-1$

@@ -139,6 +139,94 @@ public final class RestoreCommandLinuxTest {
 		assertTrue(out.toString(), contains(out, RestoreReport.OK));
 	}
 
+	/** Home con un perfil de Firefox y la CA de prueba; devuelve el perfil. */
+	private static File homeConPerfil(final File home) throws Exception {
+		final File root = new File(home, ".mozilla/firefox"); //$NON-NLS-1$
+		final File profile = new File(root, "abc.default"); //$NON-NLS-1$
+		assertTrue(profile.mkdirs());
+		Files.write(new File(root, "profiles.ini").toPath(), //$NON-NLS-1$
+				"[Profile0]\nName=default\nIsRelative=1\nPath=abc.default\n".getBytes(StandardCharsets.UTF_8)); //$NON-NLS-1$
+		return profile;
+	}
+
+	private File ca() throws Exception {
+		final File ca = new File(this.tmp.getRoot(), "Autofirma_ROOT.cer"); //$NON-NLS-1$
+		if (!ca.isFile()) {
+			Files.write(ca.toPath(), RestoreConfigLinuxHooks.generateSslCertificates()[1]);
+		}
+		return ca;
+	}
+
+	/** Como root, {@code --usuario} no toca un home que no es de root ({@code su} sin guion o
+	 * {@code sudo -E}): sale con 2, dice c&oacute;mo hacerlo y no escribe nada. */
+	@Test
+	public void usuarioComoRootRechazaHomeAjeno() throws Exception {
+		final File home = this.tmp.newFolder("home"); //$NON-NLS-1$
+		final File profile = homeConPerfil(home);
+		final List<String> out = new ArrayList<>();
+		final int code = RestoreCommandLinux.run(args("--usuario"), out::add, true, home.getPath(), ca(), null, //$NON-NLS-1$
+				p -> 1000);
+		assertEquals(out.toString(), 2, code);
+		assertEquals(out.toString(), 1, out.size());
+		assertTrue(out.toString(), out.get(0).startsWith(RestoreReport.ERROR));
+		assertTrue(out.toString(), contains(out, "«Todo el sistema»")); //$NON-NLS-1$
+		assertTrue(out.toString(), contains(out, "UID 1000")); //$NON-NLS-1$
+		assertFalse(new File(profile, "user.js").exists()); //$NON-NLS-1$
+	}
+
+	/** Como root, un home cuyo due&ntilde;o no se puede leer tambi&eacute;n se rechaza. */
+	@Test
+	public void usuarioComoRootSinDueno() throws Exception {
+		final File home = this.tmp.newFolder("home"); //$NON-NLS-1$
+		final File profile = homeConPerfil(home);
+		final List<String> out = new ArrayList<>();
+		final int code = RestoreCommandLinux.run(args("--usuario"), out::add, true, home.getPath(), ca(), null, //$NON-NLS-1$
+				p -> { throw new IOException("sin acceso"); }); //$NON-NLS-1$
+		assertEquals(out.toString(), 2, code);
+		assertTrue(out.toString(), contains(out, "sin acceso")); //$NON-NLS-1$
+		assertFalse(new File(profile, "user.js").exists()); //$NON-NLS-1$
+	}
+
+	/** Como root, el propio home de root (due&ntilde;o UID 0) s&iacute; se restaura. */
+	@Test
+	public void usuarioComoRootConHomeDeRoot() throws Exception {
+		final File home = this.tmp.newFolder("home"); //$NON-NLS-1$
+		final File profile = homeConPerfil(home);
+		final List<String> out = new ArrayList<>();
+		final int code = RestoreCommandLinux.run(args("--usuario"), out::add, true, home.getPath(), ca(), null, //$NON-NLS-1$
+				p -> 0);
+		assertEquals(out.toString(), 0, code);
+		assertTrue(new File(profile, "user.js").isFile()); //$NON-NLS-1$
+	}
+
+	/** Con el due&ntilde;o real del directorio: un home que no es de root se rechaza como root
+	 * (siendo root, el home de prueba se pasa antes a otro UID). */
+	@Test
+	public void usuarioComoRootConDuenoReal() throws Exception {
+		final File home = this.tmp.newFolder("home"); //$NON-NLS-1$
+		final File profile = homeConPerfil(home);
+		if (RestoreCommandLinux.isRoot()) {
+			Files.setAttribute(home.toPath(), "unix:uid", Integer.valueOf(54321)); //$NON-NLS-1$
+		}
+		final List<String> out = new ArrayList<>();
+		assertEquals(out.toString(), 2, RestoreCommandLinux.run(args("--usuario"), out::add, true, home.getPath(), ca(), null)); //$NON-NLS-1$
+		assertFalse(new File(profile, "user.js").exists()); //$NON-NLS-1$
+	}
+
+	/** {@code isRoot} coincide con {@code id -u}. */
+	@Test
+	public void isRootComoIdU() throws Exception {
+		final Process p = new ProcessBuilder("id", "-u").redirectErrorStream(true).start(); //$NON-NLS-1$ //$NON-NLS-2$
+		final String uid;
+		try (java.io.InputStream is = p.getInputStream()) {
+			final byte[] b = new byte[64];
+			final int n = is.read(b);
+			uid = new String(b, 0, Math.max(n, 0), StandardCharsets.US_ASCII).trim();
+		}
+		assertTrue(p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS));
+		assertEquals(uid, "0".equals(uid), RestoreCommandLinux.isRoot()); //$NON-NLS-1$
+	}
+
 	/** Sin certificado ra&iacute;z, {@code --usuario} sale con 1 y lo dice. */
 	@Test
 	public void usuarioSinCa() throws Exception {

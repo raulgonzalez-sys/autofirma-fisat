@@ -45,11 +45,13 @@ import es.gob.afirma.standalone.configurator.common.ConfiguratorUtil;
  * {@code SocketAutoFirma} y {@code Autofirma ROOT}. */
 public final class RestoreUserLinux {
 
-	/** Ruta por defecto de {@code certutil} (paquete {@code libnss3-tools}). */
+	/** Ruta de {@code certutil} (paquete {@code libnss3-tools}). */
 	public static final String CERTUTIL = "/usr/bin/certutil"; //$NON-NLS-1$
 
-	/** Propiedad del sistema que sustituye la ruta de {@code certutil}. */
-	public static final String CERTUTIL_PROPERTY = "es.gob.afirma.fisat.certutil"; //$NON-NLS-1$
+	/** Ruta que sustituye a {@code certutil} en las pruebas; nula en producci&oacute;n. Es un campo y no
+	 * una propiedad del sistema para que nada externo pueda cambiar lo que se ejecuta como root al
+	 * restaurar {@code /etc/skel}. */
+	static volatile String testCertutil = null;
 
 	static final String NICK = ConfiguratorUtil.CERT_ALIAS;
 	static final String LEGACY_NICK = "Autofirma ROOT"; //$NON-NLS-1$
@@ -120,7 +122,8 @@ public final class RestoreUserLinux {
 		}
 
 		if (!databases.isEmpty()) {
-			final String certutil = System.getProperty(CERTUTIL_PROPERTY, CERTUTIL);
+			final String test = testCertutil;
+			final String certutil = test != null ? test : CERTUTIL;
 			if (new File(certutil).canExecute()) {
 				for (final File db : databases) {
 					installCa(certutil, db, caCert, ca, report);

@@ -27,7 +27,13 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import es.gob.afirma.standalone.ui.restoreconfig.RestoreConfigLinuxHooks;
 
@@ -69,6 +75,13 @@ public final class RestoreSystemLinux {
 	/** {@code timeout} dentro de {@code runuser}: TERM a los 50 s y KILL 5 s despu&eacute;s, antes del l&iacute;mite exterior. */
 	private static final String INNER_TIMEOUT_SECONDS = "50"; //$NON-NLS-1$
 	private static final String INNER_KILL_AFTER_SECONDS = "5"; //$NON-NLS-1$
+
+	/** Tiempo m&aacute;ximo de la comprobaci&oacute;n de cada posible home (existe, ruta real y due&ntilde;o):
+	 * un montaje NFS {@code hard} sin servidor bloquear&iacute;a {@code stat} sin l&iacute;mite. */
+	static final long HOME_CHECK_SECONDS = 5;
+
+	/** Tiempo m&aacute;ximo de toda la b&uacute;squeda de homes; agotado, se saltan los que queden. */
+	static final long HOMES_BUDGET_SECONDS = 30;
 
 	/** Tiempo m&aacute;ximo de {@code getent}. */
 	private static final long GETENT_TIMEOUT_SECONDS = 10;
@@ -359,42 +372,63 @@ public final class RestoreSystemLinux {
 	/** Homes de usuario del sistema: los de {@code getent passwd} con UID &ge; 1000 que existen y los
 	 * directorios de {@code /home} con due&ntilde;o de UID &ge; 1000 que no salen de {@code /home}
 	 * (fuera quedan {@code lost+found} y los directorios de root o de cuentas de sistema), sin repetir
-	 * la misma ruta real.
+	 * la misma ruta real. Cada comprobaci&oacute;n tiene tiempo l&iacute;mite y la b&uacute;squeda entera
+	 * tambi&eacute;n: lo que no responde (un montaje de red ca&iacute;do) se salta con AVISO.
+	 * @param report Informe que recibe los avisos.
 	 * @return Homes en ese orden. */
-	public static List<File> systemHomes() {
-		return systemHomes(getent("passwd"), new File(HOME_ROOT), UidReader.FILES); //$NON-NLS-1$
+	public static List<File> systemHomes(final RestoreReport report) {
+		return systemHomes(getent("passwd"), new File(HOME_ROOT), UidReader.FILES, report, //$NON-NLS-1$
+				TimeUnit.SECONDS.toMillis(HOME_CHECK_SECONDS), TimeUnit.SECONDS.toMillis(HOMES_BUDGET_SECONDS));
 	}
 
-	static List<File> systemHomes(final List<String> passwd, final File homeRoot, final UidReader uids) {
+	static List<File> systemHomes(final List<String> passwd, final File homeRoot, final UidReader uids,
+			final RestoreReport report, final long checkMillis, final long budgetMillis) {
 		final List<File> homes = new ArrayList<>();
 		final Set<Path> seen = new HashSet<>();
-		for (final String line : passwd) {
-			final String[] fields = line.split(":", -1); //$NON-NLS-1$
-			if (fields.length < 7 || fields[5].isEmpty()) {
-				continue;
-			}
-			final int uid;
-			try {
-				uid = Integer.parseInt(fields[2]);
-			}
-			catch (final NumberFormatException e) {
-				continue;
-			}
-			final File home = new File(fields[5]);
-			if (uid >= FIRST_USER_UID && home.isDirectory() && seen.add(realPath(home))) {
-				homes.add(home);
-			}
-		}
-		final File[] dirs = homeRoot.listFiles(File::isDirectory);
-		if (dirs != null) {
-			Arrays.sort(dirs);
-			final Path root = realPath(homeRoot);
-			for (final File dir : dirs) {
-				final Path real = realPath(dir);
-				if (real.startsWith(root) && ownerUid(dir, uids) >= FIRST_USER_UID && seen.add(real)) {
-					homes.add(dir);
+		final BoundedChecks checks = new BoundedChecks(checkMillis, budgetMillis, report);
+		try {
+			for (final String line : passwd) {
+				final String[] fields = line.split(":", -1); //$NON-NLS-1$
+				if (fields.length < 7 || fields[5].isEmpty()) {
+					continue;
+				}
+				final int uid;
+				try {
+					uid = Integer.parseInt(fields[2]);
+				}
+				catch (final NumberFormatException e) {
+					continue;
+				}
+				final File home = new File(fields[5]);
+				if (uid < FIRST_USER_UID) {
+					continue;
+				}
+				final Path real = checks.call(home, () -> home.isDirectory() ? realPath(home) : null);
+				if (real != null && seen.add(real)) {
+					homes.add(home);
 				}
 			}
+			// listFiles sin filtro: leer /home no entra en los montajes; cada entrada se comprueba aparte
+			final File[] dirs = checks.call(homeRoot, homeRoot::listFiles);
+			final Path root = dirs == null ? null : checks.call(homeRoot, () -> realPath(homeRoot));
+			if (root != null) {
+				Arrays.sort(dirs);
+				for (final File dir : dirs) {
+					final Path real = checks.call(dir, () -> {
+						if (!dir.isDirectory()) {
+							return null;
+						}
+						final Path r = realPath(dir);
+						return r.startsWith(root) && ownerUid(dir, uids) >= FIRST_USER_UID ? r : null;
+					});
+					if (real != null && seen.add(real)) {
+						homes.add(dir);
+					}
+				}
+			}
+		}
+		finally {
+			checks.close();
 		}
 		return homes;
 	}
@@ -473,6 +507,60 @@ public final class RestoreSystemLinux {
 		catch (final InterruptedException e) {
 			Thread.currentThread().interrupt();
 			return false;
+		}
+	}
+
+	/** Comprobaciones de ficheros en hilos aparte, cada una con tiempo l&iacute;mite y todas con un
+	 * tiempo total. Un hilo bloqueado en el n&uacute;cleo (NFS {@code hard}) no se puede interrumpir:
+	 * se abandona como hilo demonio y la siguiente comprobaci&oacute;n usa otro. */
+	private static final class BoundedChecks {
+		private final ExecutorService pool = Executors.newCachedThreadPool(r -> {
+			final Thread t = new Thread(r, "autofirma-homes"); //$NON-NLS-1$
+			t.setDaemon(true);
+			return t;
+		});
+		private final long checkMillis;
+		private final long deadline;
+		private final RestoreReport report;
+		private boolean exhausted = false;
+
+		BoundedChecks(final long checkMillis, final long budgetMillis, final RestoreReport report) {
+			this.checkMillis = checkMillis;
+			this.deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMillis);
+			this.report = report;
+		}
+
+		/** Resultado de la comprobaci&oacute;n, o {@code null} si falla, no responde a tiempo o ya no queda tiempo. */
+		<T> T call(final File file, final Callable<T> check) {
+			final long left = TimeUnit.NANOSECONDS.toMillis(this.deadline - System.nanoTime());
+			if (left <= 0) {
+				if (!this.exhausted) {
+					this.exhausted = true;
+					this.report.warning("Se ha agotado el tiempo de búsqueda de directorios de usuario; se saltan " //$NON-NLS-1$
+							+ file + " y los que quedan"); //$NON-NLS-1$
+				}
+				return null;
+			}
+			final Future<T> result = this.pool.submit(check);
+			try {
+				return result.get(Math.min(this.checkMillis, left), TimeUnit.MILLISECONDS);
+			}
+			catch (final TimeoutException e) {
+				result.cancel(true);
+				this.report.warning(file + " no responde (¿montaje de red caído?); se salta"); //$NON-NLS-1$
+				return null;
+			}
+			catch (final ExecutionException e) {
+				return null;
+			}
+			catch (final InterruptedException e) {
+				Thread.currentThread().interrupt();
+				return null;
+			}
+		}
+
+		void close() {
+			this.pool.shutdownNow();
 		}
 	}
 

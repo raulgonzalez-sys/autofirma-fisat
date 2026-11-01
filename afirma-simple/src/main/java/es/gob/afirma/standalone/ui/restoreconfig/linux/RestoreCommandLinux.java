@@ -19,10 +19,13 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.function.Consumer;
 
+import com.sun.security.auth.module.UnixSystem;
+
 /** Orden {@code autofirma restaurar} de Linux, sin interfaz gr&aacute;fica:
  * <ul>
  *  <li>{@code --sistema}: parte de sistema y de todos los usuarios (exige root).</li>
- *  <li>{@code --usuario}: parte de usuario sobre el home de quien la ejecuta.</li>
+ *  <li>{@code --usuario}: parte de usuario sobre el home de quien la ejecuta (como root, solo si
+ *  ese home es de root).</li>
  *  <li>{@code --quitar-politicas}: quita la extensi&oacute;n CSP de los {@code policies.json} de Firefox (exige root).</li>
  * </ul>
  * Cada l&iacute;nea de salida es un paso {@code OK}, {@code AVISO} o {@code ERROR} en castellano.
@@ -80,6 +83,11 @@ public final class RestoreCommandLinux {
 
 	static int run(final String[] args, final Consumer<String> out, final boolean root, final String envHome,
 			final File caCert, final File etcDir) {
+		return run(args, out, root, envHome, caCert, etcDir, RestoreSystemLinux.UidReader.FILES);
+	}
+
+	static int run(final String[] args, final Consumer<String> out, final boolean root, final String envHome,
+			final File caCert, final File etcDir, final RestoreSystemLinux.UidReader uids) {
 		final RestoreReport report = new RestoreReport(out);
 		final String option = option(args);
 		if (option == null) {
@@ -93,9 +101,13 @@ public final class RestoreCommandLinux {
 		}
 		switch (option) {
 			case SYSTEM:
-				return RestoreSystemLinux.restore(new File(APP_DIR), etcDir, RestoreSystemLinux.systemHomes(), report);
+				return RestoreSystemLinux.restore(new File(APP_DIR), etcDir, RestoreSystemLinux.systemHomes(report), report);
 			case USER:
-				RestoreUserLinux.restore(resolveHome(envHome, System.getProperty("user.home")), caCert, report); //$NON-NLS-1$
+				final File home = resolveHome(envHome, System.getProperty("user.home")); //$NON-NLS-1$
+				if (!userHomeAllowed(home, root, uids, report)) {
+					return EXIT_USAGE;
+				}
+				RestoreUserLinux.restore(home, caCert, report);
 				return report.hasErrors() ? EXIT_ERRORS : EXIT_OK;
 			default:
 				return removePolicies(etcDir, report) ? EXIT_OK : EXIT_ERRORS;
@@ -128,9 +140,58 @@ public final class RestoreCommandLinux {
 		return new File(userHome);
 	}
 
-	/** Indica si este proceso se ejecuta como root.
+	/** Comprueba que la parte de usuario puede restaurar ese home con la identidad de este proceso.
+	 * Sin ser root siempre puede; como root solo si el home es de root: con {@code su} sin guion o
+	 * {@code sudo -E}, {@code HOME} sigue siendo el de la persona y root dejar&iacute;a a su nombre
+	 * {@code user.js}, {@code handlers.json} y las bases NSS de esa persona, que Firefox ya no
+	 * podr&iacute;a leer. Si lo rechaza, deja el error en el informe.
+	 * @param home Home que se va a restaurar.
+	 * @param root Si este proceso es root.
+	 * @param uids Lector del due&ntilde;o del home.
+	 * @param report Informe que recibe el error.
+	 * @return {@code true} si se puede restaurar. */
+	static boolean userHomeAllowed(final File home, final boolean root, final RestoreSystemLinux.UidReader uids,
+			final RestoreReport report) {
+		if (!root) {
+			return true;
+		}
+		String owner;
+		try {
+			final int uid = uids.uid(home.toPath());
+			if (uid == 0) {
+				return true;
+			}
+			owner = "UID " + uid; //$NON-NLS-1$
+		}
+		catch (final IOException | RuntimeException e) {
+			owner = "dueño desconocido: " + e; //$NON-NLS-1$
+		}
+		report.error("Como root no se restaura " + home + " (" + owner + "), que no es de root: ejecute " //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+				+ "«autofirma restaurar " + USER + "» como ese usuario, sin sudo ni su, o use «Todo el sistema» " //$NON-NLS-1$ //$NON-NLS-2$
+				+ "(autofirma restaurar " + SYSTEM + ")"); //$NON-NLS-1$ //$NON-NLS-2$
+		return false;
+	}
+
+	/** Comprobaci&oacute;n de {@link #userHomeAllowed(File, boolean, RestoreSystemLinux.UidReader, RestoreReport)}
+	 * con la identidad de este proceso y el due&ntilde;o real del home.
+	 * @param home Home que se va a restaurar.
+	 * @param report Informe que recibe el error.
+	 * @return {@code true} si se puede restaurar. */
+	public static boolean userHomeAllowed(final File home, final RestoreReport report) {
+		return userHomeAllowed(home, isRoot(), RestoreSystemLinux.UidReader.FILES, report);
+	}
+
+	/** Indica si este proceso se ejecuta como root: UID real por JAAS ({@code getuid}, sin depender de
+	 * {@code /proc}) y, si el m&oacute;dulo {@code jdk.security.auth} no est&aacute; disponible, el
+	 * due&ntilde;o de {@code /proc/self}.
 	 * @return {@code true} si su UID es 0. */
 	static boolean isRoot() {
+		try {
+			return new UnixSystem().getUid() == 0;
+		}
+		catch (final LinkageError | RuntimeException e) {
+			// Sin jdk.security.auth o sin su biblioteca nativa
+		}
 		try {
 			return ((Integer) Files.getAttribute(Paths.get("/proc/self"), "unix:uid")).intValue() == 0; //$NON-NLS-1$ //$NON-NLS-2$
 		}

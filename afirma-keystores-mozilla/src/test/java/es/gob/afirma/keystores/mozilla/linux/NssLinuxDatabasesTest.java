@@ -96,6 +96,18 @@ public class NssLinuxDatabasesTest {
 		assertTrue(NssLinuxDatabases.findDatabases(home).isEmpty());
 	}
 
+	/** ~/.mozilla con solo native-messaging-hosts tambien tapa a la XDG al leer, como en Firefox
+	 * (LegacyHomeExists mira ~/.mozilla), pero firefoxRoots la sigue devolviendo. @throws Exception En cualquier error. */
+	@Test
+	public void mozillaSinFirefoxYXdg() throws Exception {
+		final File home = home();
+		Files.createDirectories(new File(home, ".mozilla/native-messaging-hosts").toPath()); //$NON-NLS-1$
+		final File xdg = crearRaizFirefox(home, ".config/mozilla/firefox", true); //$NON-NLS-1$
+		assertNull(NssLinuxDatabases.firefoxRoot(home));
+		assertEquals(Collections.singletonList(xdg), NssLinuxDatabases.firefoxRoots(home));
+		assertTrue(NssLinuxDatabases.findDatabases(home).isEmpty());
+	}
+
 	/** Sin ninguna raiz no hay resultado. @throws Exception En cualquier error. */
 	@Test
 	public void sinFirefox() throws Exception {

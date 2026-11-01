@@ -70,9 +70,10 @@ public final class NssLinuxDatabases {
 	}
 
 	/** Obtiene la ra&iacute;z de Firefox que se debe usar para leer, con la regla del propio
-	 * Firefox: si existe el directorio tradicional esa es la ra&iacute;z y nunca se usa la XDG,
-	 * aunque el tradicional no tenga {@code profiles.ini}; la XDG solo cuenta si el directorio
-	 * tradicional no existe. La de Snap va al final.
+	 * Firefox: si existe {@code ~/.mozilla} (aunque solo tenga, por ejemplo,
+	 * {@code native-messaging-hosts}) la ra&iacute;z es la tradicional y nunca se usa la XDG,
+	 * aunque la tradicional no tenga {@code profiles.ini}; la XDG solo cuenta si
+	 * {@code ~/.mozilla} no existe. La de Snap va al final.
 	 * @param home Directorio del usuario.
 	 * @return Directorio que contiene el {@code profiles.ini}, o {@code null} si no hay. */
 	public static File firefoxRoot(final File home) {
@@ -83,7 +84,8 @@ public final class NssLinuxDatabases {
 		if (hasProfilesIni(legacy)) {
 			return legacy;
 		}
-		if (!legacy.isDirectory() && hasProfilesIni(xdgRoot(home))) {
+		// LegacyHomeExists de Firefox: ~/.mozilla/firefox o, si no, ~/.mozilla (MOZ_USER_DIR) con cualquier tipo
+		if (!new File(home, ".mozilla").exists() && hasProfilesIni(xdgRoot(home))) { //$NON-NLS-1$
 			return xdgRoot(home);
 		}
 		return hasProfilesIni(snapRoot(home)) ? snapRoot(home) : null;

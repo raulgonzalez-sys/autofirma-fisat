@@ -27,8 +27,21 @@ sobre() { "$DEB/verificar_paquete.sh" --solo "$1" "$T/$2/$NOMBRE"; }
 chk_rc depends_real 0 "$DEB/verificar_paquete.sh" --solo control_depends "$T/out/$NOMBRE"
 mutar depends_con_python sed -i 's/^Depends:.*/&, python3/' DEBIAN/control
 chk_rc depends_con_python 1 sobre control_depends depends_con_python
-mutar depends_sin_pkexec sed -i 's/, pkexec//' DEBIAN/control
+mutar depends_sin_pkexec sed -i 's/, pkexec | policykit-1//' DEBIAN/control
 chk_rc depends_sin_pkexec 1 sobre control_depends depends_sin_pkexec
+mutar depends_sin_policykit sed -i 's/pkexec | policykit-1/pkexec/' DEBIAN/control
+chk_rc depends_sin_policykit 1 sobre control_depends depends_sin_policykit
+
+# --- Conffile retirado del autostart ---
+chk_rc rm_conffile_real 0 "$DEB/verificar_paquete.sh" --solo rm_conffile "$T/out/$NOMBRE"
+for s in preinst postinst postrm; do
+	mutar "rm_conffile_sin_$s" sed -i '/rm_conffile \/etc/d' "DEBIAN/$s"
+	chk_rc "rm_conffile_sin_$s" 1 sobre rm_conffile "rm_conffile_sin_$s"
+done
+mutar rm_conffile_corte_fisat3 sed -i 's/1\.9\.1+fisat5~/1.9.1+fisat3/' DEBIAN/postinst
+chk_rc rm_conffile_corte_fisat3 1 sobre rm_conffile rm_conffile_corte_fisat3
+mutar rm_conffile_sin_aviso sed -i 's/ || aviso "no se pudo retirar el autostart antiguo"//' DEBIAN/preinst
+chk_rc rm_conffile_sin_aviso 1 sobre rm_conffile rm_conffile_sin_aviso
 
 # --- Ficheros retirados ---
 chk_rc sin_scripts_real 0 "$DEB/verificar_paquete.sh" --solo sin_scripts_usuario "$T/out/$NOMBRE"

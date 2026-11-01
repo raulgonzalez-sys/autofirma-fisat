@@ -2,7 +2,7 @@ Package: autofirma
 Architecture: all
 Section: utils
 Priority: optional
-Depends: libnss3-tools, openjdk-21-jre | default-jre, openssl, ca-certificates, pkexec
+Depends: libnss3-tools, openjdk-21-jre | default-jre, openssl, ca-certificates, pkexec | policykit-1
 Recommends: kdialog | zenity
 Version: 0.0.0+fisat0
 License: GPL-2+ | EUPL-1.1

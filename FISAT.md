@@ -144,6 +144,11 @@ Clases que ejecuta el job `pruebas` (`-Dtest` del workflow). JUnit 4, nombre
 
 - Al migrar desde el paquete oficial hay que cerrar Firefox antes: el `prerm`
   del paquete oficial hace `pkill firefox`.
+- Las versiones anteriores a `fisat5` llevaban el conffile
+  `/etc/xdg/autostart/autofirma-fisat-usuario.desktop`; `preinst`, `postinst`
+  y `postrm` lo retiran con `dpkg-maintscript-helper rm_conffile` (corte
+  `1.9.1+fisat5~`). Si se modificó a mano, queda como `.dpkg-bak`, que el
+  autostart no lee.
 - No hay paso por usuario al arrancar: el lanzador solo ajusta el locale y
   ejecuta `java`. La configuración de cada usuario la hace `autofirma
   restaurar` (ver «Restaurar instalación»). Con `restaurar` como primer
@@ -155,9 +160,10 @@ Clases que ejecuta el job `pruebas` (`-Dtest` del workflow). JUnit 4, nombre
 
 - «Restaurar instalación» (Linux) tiene dos botones. «Todo el sistema» lanza
   `pkexec /usr/bin/autofirma restaurar --sistema` y vuelca su salida al panel;
-  pide la contraseña del administrador, de ahí la dependencia de `pkexec`.
-  «Solo este usuario» restaura el home de quien ejecuta la aplicación, sin
-  privilegios.
+  pide la contraseña del administrador, de ahí la dependencia
+  `pkexec | policykit-1` (en Debian 11, Ubuntu 22.04 y anteriores y las Mint
+  basadas en ellas, `pkexec` lo trae `policykit-1`). «Solo este usuario»
+  restaura el home de quien ejecuta la aplicación, sin privilegios.
 - Orden, sin interfaz gráfica; una línea `OK`, `AVISO` o `ERROR` por paso, en
   castellano. Salida 0 correcto, 1 con errores, 2 uso incorrecto o falta de
   permisos:
@@ -165,9 +171,15 @@ Clases que ejecuta el job `pruebas` (`-Dtest` del workflow). JUnit 4, nombre
     `AutoFirma.js`, extensión CSP en `policies.json` de Firefox, `/etc/skel` y
     el home de cada usuario (con `runuser`, como su dueño; un home cuyo
     directorio es de root o de una cuenta de sistema, UID < 1000, se salta con
-    aviso). `postinst` la ejecuta en cada instalación o actualización.
+    aviso). Cada posible home se comprueba con 5 s de límite y la búsqueda
+    entera con 30 s: lo que no responde (un montaje NFS `hard` caído) se salta
+    con aviso. `postinst` la ejecuta en cada instalación o actualización.
   - `autofirma restaurar --usuario`: solo bases NSS, `user.js` y
-    `handlers.json` del usuario. Nunca genera certificados.
+    `handlers.json` del usuario. Nunca genera certificados. Como root (por
+    ejemplo con `su` sin guion o `sudo -E`, que conservan el `HOME` de la
+    persona) se niega con salida 2 salvo que el home sea de root: dejaría esos
+    ficheros a nombre de root y Firefox no podría leerlos. Lo mismo hace «Solo
+    este usuario» si la aplicación se ejecuta como root.
   - `autofirma restaurar --quitar-politicas` (root): quita la extensión CSP.
     `prerm` la ejecuta solo en `remove` o `deconfigure`, nunca al actualizar.
 - Con un perfil de Firefox abierto no se escribe `handlers.json` (Firefox lo
@@ -198,8 +210,8 @@ conocidos, sin probar:
 
 ### Raíz de Firefox en Linux
 
-- Firefox elige la raíz tradicional (`~/.mozilla/firefox`) si el directorio existe, aunque no tenga `profiles.ini`, y usa la XDG (`~/.config/mozilla/firefox`) solo en su ausencia: `nsXREDirProvider::GetLegacyOrXDGHomePath` llama a `LegacyHomeExists`, que solo mira las rutas tradicionales. Fuente: https://github.com/mozilla-firefox/firefox/blob/eed57099f5fd90b156725aeb1a25472dce631370/toolkit/xre/nsXREDirProvider.cpp (leído el 2026-10-30). `MOZ_LEGACY_HOME=1` (entorno o compilación) fuerza la tradicional aunque no exista; es una variable del proceso de Firefox que el fork no ve, y no se contempla.
-- Regla del fork para leer (`NssLinuxDatabases.firefoxRoot`), la misma: raíz tradicional con `profiles.ini`; la XDG con `profiles.ini` solo si el directorio tradicional no existe; Snap (`~/snap/firefox/common/.mozilla/firefox`) al final. Con el directorio tradicional presente y sin `profiles.ini`, no se devuelve la XDG: no hay perfil de Firefox que leer. `firefoxRoots` no aplica esa regla: devuelve todas las raíces con `profiles.ini` (tradicional, XDG, Snap) para que Restaurar cubra los perfiles de las migraciones a XDG.
+- Firefox elige la raíz tradicional (`~/.mozilla/firefox`) si existe `~/.mozilla`, aunque solo tenga otra cosa (por ejemplo `native-messaging-hosts`) y aunque no haya `profiles.ini`, y usa la XDG (`~/.config/mozilla/firefox`) solo si `~/.mozilla` no existe: `nsXREDirProvider::GetLegacyOrXDGHomePath` llama a `LegacyHomeExists`, que mira `~/.mozilla/firefox` y, si no existe, `~/.mozilla` (`MOZ_USER_DIR`). Fuente: https://github.com/mozilla-firefox/firefox/blob/eed57099f5fd90b156725aeb1a25472dce631370/toolkit/xre/nsXREDirProvider.cpp (leído el 2026-10-30 y de nuevo el 2026-11-01). `MOZ_LEGACY_HOME=1` (entorno o compilación) fuerza la tradicional aunque no exista; es una variable del proceso de Firefox que el fork no ve, y no se contempla.
+- Regla del fork para leer (`NssLinuxDatabases.firefoxRoot`), la misma: raíz tradicional con `profiles.ini`; la XDG con `profiles.ini` solo si `~/.mozilla` no existe; Snap (`~/snap/firefox/common/.mozilla/firefox`) al final. Con `~/.mozilla` presente y sin `~/.mozilla/firefox/profiles.ini`, no se devuelve la XDG: no hay perfil de Firefox que leer. `firefoxRoots` no aplica esa regla: devuelve todas las raíces con `profiles.ini` (tradicional, XDG, Snap) para que Restaurar cubra los perfiles de las migraciones a XDG.
 - `findDatabases` devuelve el perfil activo de Firefox y la base de Chrome, solo con `cert9.db` y sin repetidas por ruta real, Firefox primero. Usuario sin base de Chrome: solo Firefox.
 
 ### Chrome y AutoFirma desde la web

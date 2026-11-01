@@ -379,13 +379,13 @@ public final class RestoreUserLinuxTest {
 	public void sinCertutil() throws Exception {
 		final File home = home();
 		final File ff = profile(home, LEGACY_ROOT, "abc.default"); //$NON-NLS-1$
-		System.setProperty(RestoreUserLinux.CERTUTIL_PROPERTY, new File(SHARED.getRoot(), "no-certutil").getPath()); //$NON-NLS-1$
+		RestoreUserLinux.testCertutil = new File(SHARED.getRoot(), "no-certutil").getPath(); //$NON-NLS-1$
 		final RestoreReport report;
 		try {
 			report = restore(home);
 		}
 		finally {
-			System.clearProperty(RestoreUserLinux.CERTUTIL_PROPERTY);
+			RestoreUserLinux.testCertutil = null;
 		}
 		assertTrue(report.hasErrors());
 		assertTrue(report.getLines().toString(), hasLine(report, RestoreReport.ERROR, "certutil")); //$NON-NLS-1$

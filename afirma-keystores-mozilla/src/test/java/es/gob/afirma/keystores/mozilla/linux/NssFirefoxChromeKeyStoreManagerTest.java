@@ -297,20 +297,40 @@ public class NssFirefoxChromeKeyStoreManagerTest {
 
 	private static void ejecutar(final String... cmd) throws IOException, InterruptedException {
 		final Process p = new ProcessBuilder(cmd).redirectErrorStream(true).redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null"))).start(); //$NON-NLS-1$
-		final String out = leer(p);
-		assertTrue("Tiempo agotado: " + Arrays.toString(cmd), p.waitFor(60, TimeUnit.SECONDS)); //$NON-NLS-1$
+		final String out = esperar(p, 60, Arrays.toString(cmd));
 		assertEquals(Arrays.toString(cmd) + "\n" + out, 0, p.exitValue()); //$NON-NLS-1$
 	}
 
-	private static String leer(final Process p) throws IOException {
+	/** Lee la salida est&aacute;ndar en un hilo aparte y espera al proceso como mucho
+	 * {@code segundos}: si no termina, lo mata y la prueba falla con lo le&iacute;do hasta entonces. */
+	private static String esperar(final Process p, final long segundos, final String que) throws InterruptedException {
 		final StringBuilder sb = new StringBuilder();
-		try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
-			String line;
-			while ((line = r.readLine()) != null) {
-				sb.append(line).append('\n');
+		final Thread lector = new Thread(() -> {
+			try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+				String line;
+				while ((line = r.readLine()) != null) {
+					synchronized (sb) {
+						sb.append(line).append('\n');
+					}
+				}
 			}
+			catch (final IOException e) {
+				// El proceso ha terminado o se ha matado
+			}
+		});
+		lector.setDaemon(true);
+		lector.start();
+		final boolean terminado = p.waitFor(segundos, TimeUnit.SECONDS);
+		if (!terminado) {
+			p.destroyForcibly().waitFor(10, TimeUnit.SECONDS);
 		}
-		return sb.toString();
+		lector.join(TimeUnit.SECONDS.toMillis(10));
+		final String out;
+		synchronized (sb) {
+			out = sb.toString();
+		}
+		assertTrue("Tiempo agotado (" + segundos + " s): " + que + "\n" + out, terminado); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+		return out;
 	}
 
 	/** Ejecuta {@link #main(String[])} en otra JVM <i>headless</i> con {@code user.home}
@@ -329,8 +349,7 @@ public class NssFirefoxChromeKeyStoreManagerTest {
 		cmd.add(NssFirefoxChromeKeyStoreManagerTest.class.getName());
 		final File log = new File(this.tmp.getRoot(), "hija.log"); //$NON-NLS-1$
 		final Process p = new ProcessBuilder(cmd).redirectError(log).start();
-		final String out = leer(p);
-		assertTrue("Tiempo agotado en la JVM hija", p.waitFor(120, TimeUnit.SECONDS)); //$NON-NLS-1$
+		final String out = esperar(p, 120, "JVM hija"); //$NON-NLS-1$
 		final String err = new String(Files.readAllBytes(log.toPath()), StandardCharsets.UTF_8);
 		assertEquals(out + err, 0, p.exitValue());
 		final List<String> results = new ArrayList<>();
