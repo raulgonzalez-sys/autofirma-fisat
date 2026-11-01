@@ -24,8 +24,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import javax.security.auth.callback.PasswordCallback;
 
@@ -34,6 +36,7 @@ import es.gob.afirma.core.misc.AOUtil;
 import es.gob.afirma.keystores.AOKeyStore;
 import es.gob.afirma.keystores.AOKeyStoreManager;
 import es.gob.afirma.keystores.AggregatedKeyStoreManager;
+import es.gob.afirma.keystores.CertificateOriginProvider;
 import es.gob.afirma.keystores.mozilla.FirefoxKeyStoreMessages;
 import es.gob.afirma.keystores.mozilla.MozillaKeyStoreUtilities;
 
@@ -45,11 +48,17 @@ import es.gob.afirma.keystores.mozilla.MozillaKeyStoreUtilities;
  * Un certificado presente en las dos bases (misma huella SHA-256) aparece una sola vez, tomado
  * de Firefox salvo que solo en Chrome tenga clave privada. Si dos certificados distintos
  * tienen el mismo alias, el segundo se muestra con un sufijo ({@code alias (2)}) para que cada
- * alias firme con su propia clave. */
-public final class NssFirefoxChromeKeyStoreManager extends AggregatedKeyStoreManager {
+ * alias firme con su propia clave. Cada certificado indica en qu&eacute; navegadores est&aacute;
+ * ({@link #getCertificateOrigin(String)}: {@code Firefox}, {@code Chrome} o {@code Firefox, Chrome},
+ * tambi&eacute;n si las dos rutas llevan a la misma base) para que el selector lo muestre. */
+public final class NssFirefoxChromeKeyStoreManager extends AggregatedKeyStoreManager
+                                                   implements CertificateOriginProvider {
 
 	/** Gestores de cada ranura, en el orden de las bases (Firefox primero). */
 	private final List<AOKeyStoreManager> slots = new ArrayList<>();
+
+	/** Navegadores que usan la base de cada ranura. */
+	private final Map<AOKeyStoreManager, List<String>> origins = new HashMap<>();
 
 	/** Alias visibles y la ranura y alias real a los que corresponden ({@code null} si hay
 	 * que volver a calcularlos). */
@@ -73,6 +82,7 @@ public final class NssFirefoxChromeKeyStoreManager extends AggregatedKeyStoreMan
 			         final boolean forceReset) {
 		removeAll();
 		this.slots.clear();
+		this.origins.clear();
 		this.entries = null;
 		setKeyStore(null);
 		setKeyStoreType(AOKeyStore.MOZ_UNI);
@@ -98,6 +108,7 @@ public final class NssFirefoxChromeKeyStoreManager extends AggregatedKeyStoreMan
 				setKeyStore(slot.getKeyStore());
 			}
 			this.slots.add(slot);
+			this.origins.put(slot, NssLinuxDatabases.origins(NssMultiSlotLoader.database(provider), home));
 			addKeyStoreManager(slot);
 		}
 		if (this.slots.isEmpty()) {
@@ -145,16 +156,20 @@ public final class NssFirefoxChromeKeyStoreManager extends AggregatedKeyStoreMan
 	/** Devuelve los alias de todas las bases, sin certificados repetidos por huella SHA-256. */
 	@Override
 	public String[] getAliases() {
-		this.entries = buildEntries(this.slots);
+		this.entries = buildEntries(this.slots, this.origins);
 		return this.entries.keySet().toArray(new String[0]);
 	}
 
 	/** Re&uacute;ne los alias de los almacenes en orden. De un certificado repetido (misma huella
 	 * SHA-256) queda una sola entrada: la primera, salvo que una posterior tenga clave privada y
 	 * la primera no, para que el certificado con el que se puede firmar no quede oculto.
+	 * Cada entrada re&uacute;ne los or&iacute;genes de todas las copias del certificado, en el
+	 * orden de los almacenes.
 	 * @param stores Almacenes de las bases, Firefox primero.
-	 * @return Alias visibles y el almac&eacute;n y alias real que corresponden a cada uno. */
-	static Map<String, SlotEntry> buildEntries(final List<? extends AOKeyStoreManager> stores) {
+	 * @param origins Navegadores que usan cada almac&eacute;n.
+	 * @return Alias visibles y el almac&eacute;n, alias real y or&iacute;genes de cada uno. */
+	static Map<String, SlotEntry> buildEntries(final List<? extends AOKeyStoreManager> stores,
+			                                   final Map<AOKeyStoreManager, List<String>> origins) {
 		final Map<String, SlotEntry> ret = new LinkedHashMap<>();
 		final Map<String, String> visibleByThumbprint = new HashMap<>();
 		for (final AOKeyStoreManager slot : stores) {
@@ -171,22 +186,37 @@ public final class NssFirefoxChromeKeyStoreManager extends AggregatedKeyStoreMan
 				final String previous = thumbprint != null ? visibleByThumbprint.get(thumbprint) : null;
 				if (previous != null) {
 					final SlotEntry stored = ret.get(previous);
+					final SlotEntry kept;
 					if (!hasKey(stored.slot, stored.alias) && hasKey(slot, alias)) {
-						ret.put(previous, new SlotEntry(slot, alias));
+						kept = new SlotEntry(slot, alias);
+						kept.origins.addAll(stored.origins);
+						ret.put(previous, kept);
 					}
+					else {
+						kept = stored;
+					}
+					addOrigin(kept, origins.get(slot));
 					continue;
 				}
 				String visible = alias;
 				for (int n = 2; ret.containsKey(visible); n++) {
 					visible = alias + " (" + n + ")"; //$NON-NLS-1$ //$NON-NLS-2$
 				}
-				ret.put(visible, new SlotEntry(slot, alias));
+				final SlotEntry entry = new SlotEntry(slot, alias);
+				addOrigin(entry, origins.get(slot));
+				ret.put(visible, entry);
 				if (thumbprint != null) {
 					visibleByThumbprint.put(thumbprint, visible);
 				}
 			}
 		}
 		return ret;
+	}
+
+	private static void addOrigin(final SlotEntry entry, final List<String> slotOrigins) {
+		if (slotOrigins != null) {
+			entry.origins.addAll(slotOrigins);
+		}
 	}
 
 	private static boolean hasKey(final AOKeyStoreManager store, final String alias) {
@@ -214,7 +244,7 @@ public final class NssFirefoxChromeKeyStoreManager extends AggregatedKeyStoreMan
 
 	private SlotEntry resolve(final String alias) {
 		if (this.entries == null) {
-			this.entries = buildEntries(this.slots);
+			this.entries = buildEntries(this.slots, this.origins);
 		}
 		return alias != null ? this.entries.get(alias) : null;
 	}
@@ -263,14 +293,25 @@ public final class NssFirefoxChromeKeyStoreManager extends AggregatedKeyStoreMan
 	}
 
 	@Override
+	public String getCertificateOrigin(final String alias) {
+		final SlotEntry e = resolve(alias);
+		if (e == null || e.origins.isEmpty()) {
+			return null;
+		}
+		return String.join(", ", e.origins); //$NON-NLS-1$
+	}
+
+	@Override
 	protected AOKeyStore getType(final String alias) {
 		return getType();
 	}
 
-	/** Almac&eacute;n y alias real que corresponden a un alias visible. */
+	/** Almac&eacute;n y alias real que corresponden a un alias visible, y bases en las que
+	 * est&aacute; el certificado. */
 	static final class SlotEntry {
 		final AOKeyStoreManager slot;
 		final String alias;
+		final Set<String> origins = new LinkedHashSet<>();
 
 		SlotEntry(final AOKeyStoreManager slot, final String alias) {
 			this.slot = slot;

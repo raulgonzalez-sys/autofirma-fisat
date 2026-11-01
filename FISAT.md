@@ -131,7 +131,7 @@ Clases que ejecuta el job `pruebas` (`-Dtest` del workflow). JUnit 4, nombre
 | `RestoreConfigPanelLinuxTest` | `afirma-simple` | Restaurar: panel con dos botones (necesita pantalla, `xvfb-run`) |
 | `NssLinuxDatabasesTest` | `afirma-keystores-mozilla` | Lectura: bases NSS de Firefox y Chrome |
 | `NssMultiSlotLoaderTest` | `afirma-keystores-mozilla` | Lectura: varias bases en una inicialización |
-| `NssFirefoxChromeKeyStoreManagerTest` | `afirma-keystores-mozilla` | Lectura: un almacén con Firefox y Chrome |
+| `NssFirefoxChromeKeyStoreManagerTest` | `afirma-keystores-mozilla` | Lectura: un almacén con Firefox y Chrome; origen en el selector |
 | `CertificateSelectionPanelTest` | `afirma-ui-core-jse-keystores` | I5 |
 | `TestConfiguratorLinuxUsers` | `afirma-ui-simple-configurator` | I1 |
 | `TestConfiguratorFirefoxLinux` | `afirma-ui-simple-configurator` | I7 |
@@ -194,6 +194,9 @@ Clases que ejecuta el job `pruebas` (`-Dtest` del workflow). JUnit 4, nombre
   Solo se usan bases con `cert9.db`, sin repetidas por ruta real.
 - Usuario sin base de Chrome: se carga solo Firefox, sin error ni diálogo.
 - Base de Chrome: `~/.pki/nssdb` si existe; si no, `~/.local/share/pki/nssdb`.
+- El selector muestra el origen tras el nombre: «(Firefox)», «(Chrome)» o «(Firefox, Chrome)» si
+  el certificado está en las dos bases o las dos rutas llevan a la misma (enlace). Solo cambia el
+  texto mostrado (`AOKeyStoreDialog` → `CertificateOriginProvider`); el alias y la firma, no.
 
 ### Objetivo a largo plazo
 

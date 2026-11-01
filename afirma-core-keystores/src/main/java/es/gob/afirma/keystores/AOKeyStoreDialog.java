@@ -250,7 +250,7 @@ public final class AOKeyStoreDialog implements KeyStoreDialogManager {
     		if (certChain != null && certChain.length > 0) {
 	    		namedCerts.add(new NameCertificateBean(
 	    				certAlias,
-	    				aliassesByFriendlyName.get(certAlias),
+	    				CertificateOrigins.displayName(this.ksm, certAlias, aliassesByFriendlyName.get(certAlias)),
 	    				certChain));
     		}
     		else {

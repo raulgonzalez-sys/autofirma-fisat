@@ -106,6 +106,35 @@ public final class NssLinuxDatabases {
 		return new File(home, ".local/share/pki/nssdb"); //$NON-NLS-1$
 	}
 
+	/** Obtiene los navegadores que usan una base NSS: Firefox si es la del perfil activo,
+	 * Chrome si es la de Chrome, o los dos si las dos rutas llevan a la misma base (se
+	 * comparan por ruta real, por ejemplo con {@code ~/.pki/nssdb} enlazado al perfil).
+	 * @param db Directorio de la base.
+	 * @param home Directorio del usuario.
+	 * @return {@code Firefox}, {@code Chrome}, los dos en ese orden o ninguno. */
+	static List<String> origins(final File db, final File home) {
+		final List<String> origins = new ArrayList<>();
+		if (sameDatabase(db, firefoxProfile(home))) {
+			origins.add("Firefox"); //$NON-NLS-1$
+		}
+		if (sameDatabase(db, chromeDatabase(home))) {
+			origins.add("Chrome"); //$NON-NLS-1$
+		}
+		return origins;
+	}
+
+	private static boolean sameDatabase(final File a, final File b) {
+		if (a == null || b == null) {
+			return false;
+		}
+		try {
+			return a.toPath().toRealPath().equals(b.toPath().toRealPath());
+		}
+		catch (final IOException e) {
+			return a.getAbsoluteFile().equals(b.getAbsoluteFile());
+		}
+	}
+
 	/** Obtiene las bases NSS con {@code cert9.db} del perfil activo de Firefox y de Chrome,
 	 * sin repetidas (se comparan por ruta real) y con Firefox primero.
 	 * @param home Directorio del usuario.
