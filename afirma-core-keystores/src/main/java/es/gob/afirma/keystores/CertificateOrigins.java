@@ -10,9 +10,14 @@
 package es.gob.afirma.keystores;
 
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Set;
 import java.util.logging.Logger;
 
-/** A&ntilde;ade al nombre que se muestra de un certificado el origen que indique su gestor
+/** A&ntilde;ade al nombre que se muestra de cada certificado el origen que indique su gestor
  * ({@link CertificateOriginProvider}). Solo cambia el texto mostrado, nunca el alias. */
 final class CertificateOrigins {
 
@@ -22,35 +27,54 @@ final class CertificateOrigins {
 		// No se permite la instanciacion
 	}
 
-	/** Obtiene el nombre que se muestra de un certificado con su origen entre
-	 * par&eacute;ntesis, por ejemplo {@code Nombre (Firefox, Chrome)}.
-	 * @param ksm Gestor por el que se accede al certificado.
-	 * @param alias Alias del certificado en ese gestor.
-	 * @param name Nombre que se muestra del certificado.
-	 * @return Nombre con el origen, o el nombre sin cambios si ning&uacute;n gestor lo indica. */
-	static String displayName(final AOKeyStoreManager ksm, final String alias, final String name) {
-		final String origin = origin(ksm, alias);
-		return origin != null ? name + " (" + origin + ")" : name; //$NON-NLS-1$ //$NON-NLS-2$
+	/** Obtiene los nombres que se muestran de los certificados con su origen entre
+	 * par&eacute;ntesis, por ejemplo {@code Nombre (Firefox, Chrome)}. Los alias de cada
+	 * gestor se piden una sola vez.
+	 * @param ksm Gestor por el que se accede a los certificados.
+	 * @param names Nombre que se muestra de cada alias.
+	 * @return Nombre de cada alias con su origen, o sin cambios si ning&uacute;n gestor lo indica. */
+	static Map<String, String> withOrigins(final AOKeyStoreManager ksm, final Map<String, String> names) {
+		final Map<String, String> origins = new HashMap<>();
+		collectOrigins(ksm, new HashSet<>(names.keySet()), origins);
+		final Map<String, String> ret = new LinkedHashMap<>();
+		for (final Map.Entry<String, String> e : names.entrySet()) {
+			final String origin = origins.get(e.getKey());
+			ret.put(e.getKey(), origin != null ? e.getValue() + " (" + origin + ")" : e.getValue()); //$NON-NLS-1$ //$NON-NLS-2$
+		}
+		return ret;
 	}
 
-	/** Busca el origen en el gestor o, si es un agregado, en el primero de sus gestores que
-	 * contiene el alias, que es el que resuelve el agregado. */
-	private static String origin(final AOKeyStoreManager ksm, final String alias) {
+	/** Busca el origen de cada alias en el gestor o, si es un agregado, en el primero de sus
+	 * gestores que contiene el alias, que es el que resuelve el agregado. */
+	private static void collectOrigins(final AOKeyStoreManager ksm,
+			                           final Set<String> aliases,
+			                           final Map<String, String> origins) {
+		if (aliases.isEmpty()) {
+			return;
+		}
 		if (ksm instanceof CertificateOriginProvider) {
-			return ((CertificateOriginProvider) ksm).getCertificateOrigin(alias);
+			for (final String alias : aliases) {
+				final String origin = ((CertificateOriginProvider) ksm).getCertificateOrigin(alias);
+				if (origin != null) {
+					origins.put(alias, origin);
+				}
+			}
+			return;
 		}
 		if (ksm instanceof AggregatedKeyStoreManager) {
+			final Set<String> pending = new HashSet<>(aliases);
 			for (final AOKeyStoreManager child : ((AggregatedKeyStoreManager) ksm).getKeyStoreManagers()) {
+				final Set<String> own = new HashSet<>(pending);
 				try {
-					if (Arrays.asList(child.getAliases()).contains(alias)) {
-						return origin(child, alias);
-					}
+					own.retainAll(Arrays.asList(child.getAliases()));
 				}
 				catch (final Exception e) {
 					LOGGER.warning("No se pudieron obtener los alias de un almacen: " + e); //$NON-NLS-1$
+					continue;
 				}
+				pending.removeAll(own);
+				collectOrigins(child, own, origins);
 			}
 		}
-		return null;
 	}
 }

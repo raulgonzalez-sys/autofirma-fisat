@@ -23,6 +23,7 @@ import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -58,7 +59,7 @@ public final class NssFirefoxChromeKeyStoreManager extends AggregatedKeyStoreMan
 	private final List<AOKeyStoreManager> slots = new ArrayList<>();
 
 	/** Navegadores que usan la base de cada ranura. */
-	private final Map<AOKeyStoreManager, List<String>> origins = new HashMap<>();
+	private final Map<AOKeyStoreManager, List<String>> origins = new IdentityHashMap<>();
 
 	/** Alias visibles y la ranura y alias real a los que corresponden ({@code null} si hay
 	 * que volver a calcularlos). */

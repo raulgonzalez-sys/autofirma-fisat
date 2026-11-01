@@ -233,14 +233,14 @@ public final class AOKeyStoreDialog implements KeyStoreDialogManager {
 	@Override
 	public NameCertificateBean[] getNameCertificates() {
 
-    	final Map<String, String> aliassesByFriendlyName =
+    	final Map<String, String> aliassesByFriendlyName = CertificateOrigins.withOrigins(this.ksm,
         		KeyStoreUtilities.getAliasesByFriendlyName(
     				this.ksm.getAliases(),
     				this.ksm,
     				this.checkPrivateKeys,
     				this.showExpiredCertificates,
     				this.certFilters
-    			);
+    			));
 
     	final List<NameCertificateBean> namedCerts = new ArrayList<>(aliassesByFriendlyName.size());
     	for (final String certAlias : aliassesByFriendlyName.keySet().toArray(new String[aliassesByFriendlyName.size()])) {
@@ -250,7 +250,7 @@ public final class AOKeyStoreDialog implements KeyStoreDialogManager {
     		if (certChain != null && certChain.length > 0) {
 	    		namedCerts.add(new NameCertificateBean(
 	    				certAlias,
-	    				CertificateOrigins.displayName(this.ksm, certAlias, aliassesByFriendlyName.get(certAlias)),
+	    				aliassesByFriendlyName.get(certAlias),
 	    				certChain));
     		}
     		else {

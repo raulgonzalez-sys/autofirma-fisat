@@ -132,6 +132,7 @@ Clases que ejecuta el job `pruebas` (`-Dtest` del workflow). JUnit 4, nombre
 | `NssLinuxDatabasesTest` | `afirma-keystores-mozilla` | Lectura: bases NSS de Firefox y Chrome |
 | `NssMultiSlotLoaderTest` | `afirma-keystores-mozilla` | Lectura: varias bases en una inicialización |
 | `NssFirefoxChromeKeyStoreManagerTest` | `afirma-keystores-mozilla` | Lectura: un almacén con Firefox y Chrome; origen en el selector |
+| `CertificateOriginsTest` | `afirma-core-keystores` | Lectura: origen en el selector en una pasada |
 | `CertificateSelectionPanelTest` | `afirma-ui-core-jse-keystores` | I5 |
 | `TestConfiguratorLinuxUsers` | `afirma-ui-simple-configurator` | I1 |
 | `TestConfiguratorFirefoxLinux` | `afirma-ui-simple-configurator` | I7 |

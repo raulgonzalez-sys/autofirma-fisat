@@ -24,6 +24,7 @@ import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -184,22 +185,8 @@ public class NssFirefoxChromeKeyStoreManagerTest {
 	 * @throws Exception En cualquier error. */
 	@Test
 	public void dedupPrefiereConClaveSinNss() throws Exception {
-		final File p12 = new File(this.tmp.getRoot(), "certA.p12"); //$NON-NLS-1$
-		ejecutar(
-			new File(System.getProperty("java.home"), "bin/keytool").getAbsolutePath(), //$NON-NLS-1$ //$NON-NLS-2$
-			"-genkeypair", "-keystore", p12.getAbsolutePath(), "-storetype", "PKCS12", //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
-			"-storepass", P12_PASSWORD, "-alias", "certa", "-dname", "CN=certA", //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
-			"-keyalg", "RSA", "-keysize", "2048", "-validity", "30" //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$ //$NON-NLS-5$ //$NON-NLS-6$
-		);
-		// PKCS#12 guarda los alias en minusculas
-		final KeyStore conClave = KeyStore.getInstance("PKCS12"); //$NON-NLS-1$
-		try (InputStream is = new FileInputStream(p12)) {
-			conClave.load(is, P12_PASSWORD.toCharArray());
-		}
-		final KeyStore sinClave = KeyStore.getInstance("PKCS12"); //$NON-NLS-1$
-		sinClave.load(null, null);
-		sinClave.setCertificateEntry("certa", conClave.getCertificate("certa")); //$NON-NLS-1$ //$NON-NLS-2$
-		final AOKeyStoreManager firefox = new AlmacenFijo(sinClave);
+		final KeyStore conClave = p12ConClave();
+		final AOKeyStoreManager firefox = new AlmacenFijo(soloCertificado(conClave));
 		final AOKeyStoreManager chrome = new AlmacenFijo(conClave);
 
 		final Map<String, NssFirefoxChromeKeyStoreManager.SlotEntry> entries =
@@ -212,6 +199,50 @@ public class NssFirefoxChromeKeyStoreManagerTest {
 			NssFirefoxChromeKeyStoreManager.buildEntries(Arrays.asList(chrome, firefox), Collections.<AOKeyStoreManager, List<String>>emptyMap());
 		assertEquals(Collections.singletonList("certa"), new ArrayList<>(inverso.keySet())); //$NON-NLS-1$
 		assertSame(chrome, inverso.get("certa").slot); //$NON-NLS-1$
+	}
+
+	/** Sin NSS: el certificado sin clave en Firefox y con clave en Chrome queda con la copia
+	 * de Chrome, que firma, y conserva los dos or&iacute;genes en el orden de las bases.
+	 * @throws Exception En cualquier error. */
+	@Test
+	public void origenDedupConClaveSinNss() throws Exception {
+		final KeyStore conClave = p12ConClave();
+		final AOKeyStoreManager firefox = new AlmacenFijo(soloCertificado(conClave));
+		final AOKeyStoreManager chrome = new AlmacenFijo(conClave);
+		final Map<AOKeyStoreManager, List<String>> origenes = new IdentityHashMap<>();
+		origenes.put(firefox, Collections.singletonList("Firefox")); //$NON-NLS-1$
+		origenes.put(chrome, Collections.singletonList("Chrome")); //$NON-NLS-1$
+
+		final Map<String, NssFirefoxChromeKeyStoreManager.SlotEntry> entries =
+			NssFirefoxChromeKeyStoreManager.buildEntries(Arrays.asList(firefox, chrome), origenes);
+		assertEquals(Collections.singletonList("certa"), new ArrayList<>(entries.keySet())); //$NON-NLS-1$
+		assertSame(chrome, entries.get("certa").slot); //$NON-NLS-1$
+		assertEquals(Arrays.asList("Firefox", "Chrome"), new ArrayList<>(entries.get("certa").origins)); //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+	}
+
+	/** Crea con {@code keytool} un PKCS#12 con un certificado autofirmado y su clave, de alias
+	 * {@code certa} (PKCS#12 guarda los alias en min&uacute;sculas). */
+	private KeyStore p12ConClave() throws Exception {
+		final File p12 = new File(this.tmp.getRoot(), "certA.p12"); //$NON-NLS-1$
+		ejecutar(
+			new File(System.getProperty("java.home"), "bin/keytool").getAbsolutePath(), //$NON-NLS-1$ //$NON-NLS-2$
+			"-genkeypair", "-keystore", p12.getAbsolutePath(), "-storetype", "PKCS12", //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+			"-storepass", P12_PASSWORD, "-alias", "certa", "-dname", "CN=certA", //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$
+			"-keyalg", "RSA", "-keysize", "2048", "-validity", "30" //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$ //$NON-NLS-4$ //$NON-NLS-5$ //$NON-NLS-6$
+		);
+		final KeyStore ks = KeyStore.getInstance("PKCS12"); //$NON-NLS-1$
+		try (InputStream is = new FileInputStream(p12)) {
+			ks.load(is, P12_PASSWORD.toCharArray());
+		}
+		return ks;
+	}
+
+	/** Almac&eacute;n con el certificado {@code certa} del indicado, sin su clave. */
+	private static KeyStore soloCertificado(final KeyStore conClave) throws Exception {
+		final KeyStore ks = KeyStore.getInstance("PKCS12"); //$NON-NLS-1$
+		ks.load(null, null);
+		ks.setCertificateEntry("certa", conClave.getCertificate("certa")); //$NON-NLS-1$ //$NON-NLS-2$
+		return ks;
 	}
 
 	/** Certificado solo en la base de Firefox: su origen es Firefox y firma.

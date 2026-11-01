@@ -31,7 +31,7 @@ jobs:
         run: |
           xvfb-run -a mvn -B -ntp -P env-dev,autofirma \
             -pl afirma-ui-core-jse,afirma-simple,afirma-ui-simple-configurator,afirma-ui-core-jse-keystores,afirma-keystores-mozilla -am test \
-            -Dtest='AfirmaWebSocketServerTest,SecureSocketUtilsTest,ServiceInvocationManagerTest,TestRestoreConfigFirefox,RestoreConfigLinuxTest,CertificateSelectionPanelTest,TestConfiguratorLinuxUsers,TestConfiguratorFirefoxLinux,TestConfiguratorFirefoxCommon,TestCertUtil,NativeFileDialogsTest,JSEUIManagerNativeDialogsTest,NssLinuxDatabasesTest,NssMultiSlotLoaderTest,NssFirefoxChromeKeyStoreManagerTest,RestoreUserLinuxTest,RestoreSystemLinuxTest,FirefoxPoliciesTest,RestoreCommandLinuxTest,RestoreConfigPanelLinuxTest' \
+            -Dtest='AfirmaWebSocketServerTest,SecureSocketUtilsTest,ServiceInvocationManagerTest,TestRestoreConfigFirefox,RestoreConfigLinuxTest,CertificateSelectionPanelTest,TestConfiguratorLinuxUsers,TestConfiguratorFirefoxLinux,TestConfiguratorFirefoxCommon,TestCertUtil,NativeFileDialogsTest,JSEUIManagerNativeDialogsTest,NssLinuxDatabasesTest,NssMultiSlotLoaderTest,NssFirefoxChromeKeyStoreManagerTest,CertificateOriginsTest,RestoreUserLinuxTest,RestoreSystemLinuxTest,FirefoxPoliciesTest,RestoreCommandLinuxTest,RestoreConfigPanelLinuxTest' \
             -Dsurefire.failIfNoSpecifiedTests=false -DfailIfNoTests=false
       - name: Tests de shell
         run: bash afirma-simple-installer/linux/instalador_deb/tests/run.sh
