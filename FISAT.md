@@ -100,6 +100,11 @@ git tag -a v1.9.1+fisat1 -m "AutoFirma 1.9.1+fisat1 (fork FISAT)"
 git push origin v1.9.1+fisat1
 ```
 
+Sin poder empujar el tag, se publica a mano desde Actions: «Run workflow»
+sobre `fisat` con `version` = `X.Y.Z+fisatN`. El job `deb` comprueba que se lanza
+sobre `fisat` y que el tag no existe, y `gh release create --target` crea el tag
+en el commit de `fisat` y la release. Con `version` vacío solo corren las pruebas.
+
 Comprobación local del job `deb` sin publicar:
 
 ```bash
