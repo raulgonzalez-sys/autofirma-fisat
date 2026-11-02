@@ -22,7 +22,7 @@ import es.gob.afirma.keystores.mozilla.ProfilesIni.StateInfo;
 /** M&eacute;todos de utilidad para Mozilla Firefox y Nestcape.
  * Inspirada en la clase com.sun.deploy.net.proxy.NSPreferences de Sun
  * Microsystems. */
-final class NSPreferences {
+public final class NSPreferences {
 
 	private static final Logger LOGGER = Logger.getLogger("es.gob.afirma"); //$NON-NLS-1$
 
@@ -49,7 +49,7 @@ final class NSPreferences {
      * @param iniFile Fichero con la informaci&oacute;n de los perfiles de Firefox.
      * @return Directorio con la informaci&oacute;n del perfil.
      * @throws IOException Cuando ocurre un error abriendo o leyendo el fichero. */
-    static String getFireFoxUserProfileDirectory(final File iniFile) throws IOException {
+    public static String getFireFoxUserProfileDirectory(final File iniFile) throws IOException {
 
         if (iniFile == null) {
             throw new IllegalArgumentException(

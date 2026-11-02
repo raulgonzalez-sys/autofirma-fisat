@@ -22,7 +22,7 @@ import java.util.logging.Logger;
 
 import es.gob.afirma.core.ui.LanguageManager;
 
-final class FirefoxKeyStoreMessages {
+public final class FirefoxKeyStoreMessages {
 
 	private static final String BUNDLE_NAME = "firefoxmessages.firefoxmessages"; //$NON-NLS-1$
     private static final String BUNDLE_BASENAME = "firefoxmessages"; //$NON-NLS-1$
@@ -37,7 +37,7 @@ final class FirefoxKeyStoreMessages {
         // No permitimos la instanciacion
     }
 
-    static String getString(final String key) {
+    public static String getString(final String key) {
         try {
             return RESOURCE_BUNDLE.getString(key);
         }

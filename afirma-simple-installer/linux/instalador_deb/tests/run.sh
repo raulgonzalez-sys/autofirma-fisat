@@ -1,5 +1,5 @@
 #!/bin/bash
-# Ejecuta los tests de shell, shellcheck y py_compile del paquete; sale 1 si algo falla.
+# Ejecuta los tests de shell y shellcheck del paquete; sale 1 si algo falla.
 set -euo pipefail
 
 DEB=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -22,12 +22,6 @@ echo "== shellcheck"
 for s in "${scripts[@]}"; do
 	shellcheck -x -P SCRIPTDIR "$s" || { echo "FALLO shellcheck: $s"; fallos=$((fallos + 1)); }
 done
-
-echo "== py_compile"
-while IFS= read -r p; do
-	python3 -m py_compile "$p" || { echo "FALLO py_compile: $p"; fallos=$((fallos + 1)); }
-	rm -rf "$(dirname "$p")/__pycache__"
-done < <(find "$DEB" -name '*.py' -type f | sort)
 
 if [ "$fallos" -ne 0 ]; then
 	echo "run.sh: $fallos fallo(s)"

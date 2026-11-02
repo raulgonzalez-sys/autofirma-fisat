@@ -14,10 +14,12 @@ import java.util.Map;
 
 import javax.security.auth.callback.PasswordCallback;
 
+import es.gob.afirma.core.misc.Platform;
 import es.gob.afirma.keystores.AOKeyStore;
 import es.gob.afirma.keystores.AOKeyStoreManager;
 import es.gob.afirma.keystores.mozilla.MozillaUnifiedKeyStoreManager;
 import es.gob.afirma.keystores.mozilla.NssKeyStoreManager;
+import es.gob.afirma.keystores.mozilla.linux.NssFirefoxChromeKeyStoreManager;
 
 /** Representa a un <i>AOKeyStoreManager</i> para acceso a almacenes de claves tipo NSS de sistema (compartido)
  * en el que se tratan de forma unificada los m&oacute;dulos internos y externos.
@@ -40,6 +42,9 @@ public final class SharedNssKeyStoreManager extends MozillaUnifiedKeyStoreManage
 
 	@Override
 	protected AOKeyStoreManager getNssKeyStoreManager() {
+		if (Platform.OS.LINUX.equals(Platform.getOS())) {
+			return new NssFirefoxChromeKeyStoreManager(getParentComponent());
+		}
 		return new NssKeyStoreManager(getParentComponent(), true);
 	}
 

@@ -26,12 +26,12 @@ jobs:
       - name: Dependencias del sistema
         run: |
           sudo apt-get update
-          sudo apt-get install -y libnss3-tools openssl python3 jq shellcheck desktop-file-utils lintian fakeroot
+          sudo apt-get install -y libnss3-tools openssl jq shellcheck desktop-file-utils lintian fakeroot xvfb
       - name: Tests Java
         run: |
-          mvn -B -ntp -P env-dev,autofirma \
-            -pl afirma-ui-core-jse,afirma-simple,afirma-ui-simple-configurator,afirma-ui-core-jse-keystores -am test \
-            -Dtest='AfirmaWebSocketServerTest,SecureSocketUtilsTest,ServiceInvocationManagerTest,TestRestoreConfigFirefox,RestoreConfigLinuxTest,CertificateSelectionPanelTest,TestConfiguratorLinuxUsers,TestConfiguratorFirefoxLinux,TestConfiguratorFirefoxCommon,TestCertUtil,NativeFileDialogsTest,JSEUIManagerNativeDialogsTest' \
+          xvfb-run -a mvn -B -ntp -P env-dev,autofirma \
+            -pl afirma-ui-core-jse,afirma-simple,afirma-ui-simple-configurator,afirma-ui-core-jse-keystores,afirma-keystores-mozilla -am test \
+            -Dtest='AfirmaWebSocketServerTest,SecureSocketUtilsTest,ServiceInvocationManagerTest,TestRestoreConfigFirefox,RestoreConfigLinuxTest,CertificateSelectionPanelTest,TestConfiguratorLinuxUsers,TestConfiguratorFirefoxLinux,TestConfiguratorFirefoxCommon,TestCertUtil,NativeFileDialogsTest,JSEUIManagerNativeDialogsTest,NssLinuxDatabasesTest,NssMultiSlotLoaderTest,NssFirefoxChromeKeyStoreManagerTest,CertificateOriginsTest,RestoreUserLinuxTest,RestoreSystemLinuxTest,FirefoxPoliciesTest,RestoreCommandLinuxTest,RestoreConfigPanelLinuxTest' \
             -Dsurefire.failIfNoSpecifiedTests=false -DfailIfNoTests=false
       - name: Tests de shell
         run: bash afirma-simple-installer/linux/instalador_deb/tests/run.sh
@@ -53,7 +53,7 @@ jobs:
       - name: Dependencias del sistema
         run: |
           sudo apt-get update
-          sudo apt-get install -y libnss3-tools openssl python3 jq shellcheck desktop-file-utils lintian fakeroot
+          sudo apt-get install -y libnss3-tools openssl jq shellcheck desktop-file-utils lintian fakeroot
       - name: Validar el tag contra la versión del proyecto
         run: |
           re='^v([0-9]+\.[0-9]+\.[0-9]+)\+fisat([0-9]+)$'
@@ -69,7 +69,7 @@ jobs:
       - name: Build de JAR
         run: |
           mvn -B -ntp -DskipTests -P env-dev,env-install \
-            -pl afirma-simple,afirma-ui-simple-configurator -am clean package
+            -pl afirma-simple -am clean package
       - name: Comprobar que las clases salen del reactor
         run: |
           c=es/gob/afirma/standalone/protocol/AfirmaWebSocketServer.class
@@ -81,8 +81,7 @@ jobs:
         run: |
           D=afirma-simple-installer/linux/instalador_deb
           "$D/construir_deb.sh" "${GITHUB_REF_NAME#v}" dist \
-            afirma-simple/target/autofirma.jar \
-            afirma-ui-simple-configurator/target/autofirmaConfigurador.jar
+            afirma-simple/target/autofirma.jar
           "$D/verificar_paquete.sh" dist/*.deb
       - name: Publicar en Releases
         env:

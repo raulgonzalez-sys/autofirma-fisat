@@ -1,6 +1,12 @@
 #!/bin/bash
 aviso() { echo "autofirma $0: AVISO: $*" >&2; }
 
+# El autostart autofirma-fisat-usuario.desktop fue conffile antes de fisat5 y ya no existe: dpkg lo conservaria
+# al actualizar y cada inicio de sesion ejecutaria un script borrado
+if dpkg-maintscript-helper supports rm_conffile 2>/dev/null; then
+	dpkg-maintscript-helper rm_conffile /etc/xdg/autostart/autofirma-fisat-usuario.desktop 1.9.1+fisat5~ -- "$@" || aviso "no se pudo retirar el autostart antiguo"
+fi
+
 # Creamos los directorios necesarios para no obtener errores durante la instalacion
 mkdir -p /root/.local/share/applications/ || aviso "no se pudo crear /root/.local/share/applications/"
 mkdir -p /root/.config/ || aviso "no se pudo crear /root/.config/"

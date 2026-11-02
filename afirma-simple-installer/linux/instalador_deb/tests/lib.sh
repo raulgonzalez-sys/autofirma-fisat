@@ -37,28 +37,3 @@ fin() {
 	echo "$PASA correctos, $FALLA fallos"
 	[ "$FALLA" -eq 0 ] || exit 1
 }
-
-# mk_cer <ruta.cer> [cn]: certificado autofirmado en DER (CN por defecto el de la CA de AutoFirma)
-mk_cer() {
-	openssl req -x509 -newkey rsa:2048 -nodes -keyout /dev/null -subj "/CN=${2:-AutoFirma ROOT}" -days 30 2>/dev/null |
-		openssl x509 -outform der -out "$1"
-}
-
-# mk_nss <dir>: BD NSS nueva sin contraseña
-mk_nss() {
-	mkdir -p "$1"
-	certutil -N -d "sql:$1" --empty-password
-}
-
-# mk_ini <raíz> <contenido>: escribe <raíz>/profiles.ini
-mk_ini() {
-	mkdir -p "$1"
-	printf '%s\n' "$2" >"$1/profiles.ini"
-}
-
-# mk_personal <db> [apodo]: certificado autofirmado con clave privada (apodo por defecto "Usuario Prueba")
-mk_personal() {
-	local apodo=${2:-Usuario Prueba} ruido=$T/ruido.$RANDOM
-	head -c 64 /dev/urandom >"$ruido"
-	certutil -S -d "sql:$1" -n "$apodo" -s "CN=$apodo" -x -t "u,u,u" -k rsa -g 2048 -z "$ruido" -f /dev/null </dev/null >/dev/null 2>&1
-}

@@ -23,6 +23,7 @@ import es.gob.afirma.keystores.AOKeyStoreManagerException;
 import es.gob.afirma.keystores.AggregatedKeyStoreManager;
 import es.gob.afirma.keystores.KeyStoreUtilities;
 import es.gob.afirma.keystores.callbacks.UIPasswordCallback;
+import es.gob.afirma.keystores.mozilla.linux.NssFirefoxChromeKeyStoreManager;
 
 /** Representa a un <i>AOKeyStoreManager</i> para acceso a almacenes de claves de Firefox accedidos
  *  v&iacute;a NSS en el que se tratan de forma unificada los m&oacute;dulos internos y externos. */
@@ -234,6 +235,9 @@ public class MozillaUnifiedKeyStoreManager extends AggregatedKeyStoreManager {
 	/** Obtiene el gestor interno exclusivo del almac&acute;n NSS.
 	 * @return Gestor interno exclusivo del almac&acute;n NSS. */
 	protected AOKeyStoreManager getNssKeyStoreManager() {
+		if (Platform.OS.LINUX.equals(Platform.getOS())) {
+			return new NssFirefoxChromeKeyStoreManager(getParentComponent());
+		}
 		return new NssKeyStoreManager(getParentComponent(), false);
 	}
 }

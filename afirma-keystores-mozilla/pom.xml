@@ -37,4 +37,23 @@
 
 	</dependencies>
 
+	<build>
+		<plugins>
+			<!-- NSS solo se inicializa una vez por proceso: cada clase de pruebas en su propia JVM -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<version>3.2.5</version>
+				<configuration>
+					<forkCount>1</forkCount>
+					<reuseForks>false</reuseForks>
+					<!-- Rutas de bases con tildes y enes: la JVM necesita una configuracion regional UTF-8 -->
+					<environmentVariables>
+						<LC_ALL>C.UTF-8</LC_ALL>
+					</environmentVariables>
+				</configuration>
+			</plugin>
+		</plugins>
+	</build>
+
 </project>
