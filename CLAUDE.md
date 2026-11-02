@@ -21,8 +21,11 @@ distribución basada en Debian, no solo en los equipos para los que se hizo.
   rutas personales, detalles de directorio (SSSD/LDAP), enlaces a sesiones de
   chat. Tampoco en mensajes de commit, PR ni tests (ejemplos con
   `example.org`).
-- Commits con autor y committer `Claude <noreply@anthropic.com>` (ya fijado en
-  el clon). Mensajes en castellano.
+- Commits sin datos personales: ni nombre ni correo de ninguna persona en autor,
+  committer o trailers; la identidad es `Claude <noreply@anthropic.com>` (ya
+  fijada en el clon). Los merges desde la web de GitHub usan el correo de la
+  cuenta, así que esa cuenta tiene que tener el correo privado. Mensajes en
+  castellano.
 
 ## Ramas, CI y release
 
