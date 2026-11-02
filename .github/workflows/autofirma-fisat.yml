@@ -6,6 +6,11 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versión a publicar desde fisat (X.Y.Z+fisatN); vacío = solo pruebas'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -38,7 +43,9 @@ jobs:
 
   deb:
     needs: pruebas
-    if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref_name, '+fisat')
+    if: >-
+      (startsWith(github.ref, 'refs/tags/v') && contains(github.ref_name, '+fisat')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.version != '')
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -54,16 +61,35 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libnss3-tools openssl jq shellcheck desktop-file-utils lintian fakeroot
+      - name: Determinar el tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          # Lanzamiento manual: solo desde fisat; el tag lo crea gh release create
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            if [ "$GITHUB_REF" != refs/heads/fisat ]; then
+              echo "La publicación manual solo se lanza sobre fisat (ref: $GITHUB_REF)" >&2
+              exit 1
+            fi
+            TAG="v$VERSION"
+            if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+              echo "El tag $TAG ya existe" >&2
+              exit 1
+            fi
+          else
+            TAG=$GITHUB_REF_NAME
+          fi
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
       - name: Validar el tag contra la versión del proyecto
         run: |
           re='^v([0-9]+\.[0-9]+\.[0-9]+)\+fisat([0-9]+)$'
-          if ! [[ $GITHUB_REF_NAME =~ $re ]]; then
-            echo "Tag no válido '$GITHUB_REF_NAME': se espera vX.Y.Z+fisatN" >&2
+          if ! [[ $TAG =~ $re ]]; then
+            echo "Tag no válido '$TAG': se espera vX.Y.Z+fisatN" >&2
             exit 1
           fi
           pom=$(mvn -q -B -ntp help:evaluate -Dexpression=project.version -DforceStdout)
           if [ "${BASH_REMATCH[1]}" != "$pom" ]; then
-            echo "El tag ($GITHUB_REF_NAME) no coincide con la versión del pom ($pom)" >&2
+            echo "El tag ($TAG) no coincide con la versión del pom ($pom)" >&2
             exit 1
           fi
       - name: Build de JAR
@@ -80,13 +106,18 @@ jobs:
       - name: Construir y verificar el paquete
         run: |
           D=afirma-simple-installer/linux/instalador_deb
-          "$D/construir_deb.sh" "${GITHUB_REF_NAME#v}" dist \
+          "$D/construir_deb.sh" "${TAG#v}" dist \
             afirma-simple/target/autofirma.jar
           "$D/verificar_paquete.sh" dist/*.deb
       - name: Publicar en Releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.deb dist/*.sha256 \
-            --verify-tag --title "$GITHUB_REF_NAME" \
-            --notes "AutoFirma ${GITHUB_REF_NAME#v} (fork FISAT)"
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            origen=(--target "$GITHUB_SHA")
+          else
+            origen=(--verify-tag)
+          fi
+          gh release create "$TAG" dist/*.deb dist/*.sha256 \
+            "${origen[@]}" --title "$TAG" \
+            --notes "AutoFirma ${TAG#v} (fork FISAT)"
